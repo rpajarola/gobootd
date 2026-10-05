@@ -30,8 +30,8 @@ import (
 
 func init() { daemon.Register(service.RMP, func() daemon.Service { return &Server{} }) }
 
-// Filter selects 802.3 frames for the HP SAP.
-const Filter = "ether[12:2] <= 1500 and ether[14] == 0xf8"
+// Match selects 802.3 frames for the HP SAP.
+func Match(f link.Frame) bool { return f.Type == 0 && len(f.Payload) > 0 && f.Payload[0] == sapHP }
 
 // MatchKey is the class match key for the machine type clients send.
 const MatchKey = "rmp_machtype"
@@ -79,12 +79,12 @@ func (s *Server) Run(ctx context.Context, env *daemon.Env) error {
 	s.sessions = map[string]*session{}
 	defer s.closeAll()
 
-	ports, err := link.OpenAll(env.Link, env.Config.Interfaces, Filter)
+	ports, err := env.Subscribe(Match)
 	if err != nil {
 		return err
 	}
 	for _, p := range ports {
-		env.Log.Info("listening", "interface", p.Interface().Name, "mac", p.Interface().MAC.String(), "server_name", s.opts.ServerName)
+		env.Log.Info("listening", "network", p.Interface().Name, "server_name", s.opts.ServerName)
 	}
 	go func() {
 		t := time.NewTicker(time.Minute)
@@ -115,7 +115,7 @@ func (s *Server) handle(env *daemon.Env, port link.Port, frame []byte) {
 		return
 	}
 	client := f.Src.String()
-	log := env.Log.With("interface", iface.Name, "client", client)
+	log := env.Log.With("network", iface.Name, "client", client)
 	lvl := slog.LevelInfo
 	if req.Type == ReadReq && req.Seq != 0 {
 		lvl = slog.LevelDebug - 1 // every block of a transfer

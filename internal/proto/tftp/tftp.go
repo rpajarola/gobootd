@@ -3,8 +3,8 @@
 //
 // Clients are identified by their IP address and may only read the files
 // configured for them. Requests sent to a broadcast address, as some boot
-// PROMs do, are answered from this server's address on the client's
-// subnet, and refused silently so other servers can answer.
+// PROMs do, are answered too, but refused silently so other servers can
+// answer.
 package tftp
 
 import (
@@ -22,9 +22,9 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/net/ipv4"
-
 	"github.com/rpajarola/gobootd/internal/daemon"
+	"github.com/rpajarola/gobootd/internal/ipstack"
+	"github.com/rpajarola/gobootd/internal/netif"
 	"github.com/rpajarola/gobootd/internal/service"
 )
 
@@ -32,6 +32,8 @@ func init() { daemon.Register(service.TFTP, func() daemon.Service { return &Serv
 
 // Options are the settings in the tftp service block.
 type Options struct {
+	// Port is the port to listen on. Default 69.
+	Port int `hcl:"port,optional"`
 	// Timeout is the retransmission timeout in seconds, unless the client
 	// asks for another one. Default 2.
 	Timeout int `hcl:"timeout,optional"`
@@ -51,8 +53,6 @@ const (
 // Server serves files over TFTP.
 type Server struct {
 	opts Options
-	// listening is called with each listening address; for tests.
-	listening func(net.Addr)
 }
 
 // Options implements daemon.Configurable.
@@ -60,6 +60,9 @@ func (s *Server) Options() any { return &s.opts }
 
 // Run implements daemon.Service.
 func (s *Server) Run(ctx context.Context, env *daemon.Env) error {
+	if s.opts.Port <= 0 {
+		s.opts.Port = 69
+	}
 	if s.opts.Timeout <= 0 {
 		s.opts.Timeout = 2
 	}
@@ -70,145 +73,57 @@ func (s *Server) Run(ctx context.Context, env *daemon.Env) error {
 		s.opts.MaxBlockSize = 1468
 	}
 	s.opts.MaxBlockSize = max(minBlockSize, min(s.opts.MaxBlockSize, maxBlockSize))
-
-	addrs := env.Config.Listen
-	if len(addrs) == 0 {
-		addrs = []string{":69"}
-	}
-	var conns []*ipv4.PacketConn
-	defer func() {
-		for _, c := range conns {
-			c.Close()
-		}
-	}()
-	for _, a := range addrs {
-		c, err := net.ListenPacket("udp4", a)
-		if err != nil {
-			return err
-		}
-		pc := ipv4.NewPacketConn(c)
-		if err := pc.SetControlMessage(ipv4.FlagDst|ipv4.FlagInterface, true); err != nil {
-			c.Close()
-			return fmt.Errorf("%s: %w", a, err)
-		}
-		conns = append(conns, pc)
-		env.Log.Info("listening", "addr", c.LocalAddr().String())
-		if s.listening != nil {
-			s.listening(c.LocalAddr())
-		}
+	if len(env.Networks) == 0 {
+		return errors.New("no network")
 	}
 
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	var wg sync.WaitGroup
-	for _, pc := range conns {
+	defer wg.Wait()
+	for _, n := range env.Networks {
+		l, err := n.IP.ListenUDP(uint16(s.opts.Port))
+		if err != nil {
+			cancel(nil)
+			return fmt.Errorf("network %s: %w", n.Name(), err)
+		}
+		env.Log.Info("listening", "network", n.Name(), "addr", netip.AddrPortFrom(n.Addr().Addr(), uint16(s.opts.Port)).String())
 		wg.Go(func() {
-			if err := s.serve(ctx, env, pc, &wg); err != nil && ctx.Err() == nil {
+			defer l.Close()
+			if err := s.serve(ctx, env, n, l, &wg); err != nil && ctx.Err() == nil {
 				cancel(err)
 			}
 		})
 	}
 	<-ctx.Done()
-	for _, c := range conns {
-		c.Close()
-	}
-	wg.Wait()
 	if err := context.Cause(ctx); !errors.Is(err, context.Canceled) {
 		return err
 	}
 	return nil
 }
 
-func (s *Server) serve(ctx context.Context, env *daemon.Env, pc *ipv4.PacketConn, wg *sync.WaitGroup) error {
-	buf := make([]byte, 65536)
+func (s *Server) serve(ctx context.Context, env *daemon.Env, n *netif.Network, l *ipstack.UDPListener, wg *sync.WaitGroup) error {
+	local := n.Addr().Addr()
 	for {
-		n, cm, src, err := pc.ReadFrom(buf)
+		d, err := l.Read(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
 			}
 			return err
 		}
-		ua, ok := src.(*net.UDPAddr)
-		if !ok {
-			continue
-		}
-		client := ua.AddrPort()
-		client = netip.AddrPortFrom(client.Addr().Unmap(), client.Port())
-		req, err := parseRequest(buf[:n])
-		log := env.Log.With("client", client.Addr().String())
+		log := env.Log.With("network", n.Name(), "client", d.From.Addr().String())
+		req, err := parseRequest(d.Data)
 		if err != nil {
 			log.Debug("ignoring packet", "err", err)
 			continue
 		}
-		local, broadcast := localAddr(cm, client.Addr())
 		t := &transfer{
-			s: s, env: env, log: log, req: req,
-			client: client, local: local, broadcast: broadcast,
+			s: s, env: env, log: log, req: req, ip: n.IP,
+			client: d.From, local: local, broadcast: d.To != local,
 		}
 		wg.Go(func() { t.run(ctx) })
 	}
-}
-
-// localAddr returns the address to answer from, and whether the request
-// was sent to a broadcast address rather than to this server.
-func localAddr(cm *ipv4.ControlMessage, client netip.Addr) (netip.Addr, bool) {
-	if cm == nil {
-		return netip.Addr{}, false
-	}
-	dst, _ := netip.AddrFromSlice(cm.Dst)
-	dst = dst.Unmap()
-	if isLocal(dst) {
-		return dst, false
-	}
-	ifi, err := net.InterfaceByIndex(cm.IfIndex)
-	if err != nil {
-		return netip.Addr{}, true
-	}
-	addrs, _ := ifi.Addrs()
-	var first netip.Addr
-	for _, a := range addrs {
-		n, ok := a.(*net.IPNet)
-		if !ok {
-			continue
-		}
-		p, ok := netip.AddrFromSlice(n.IP)
-		if !ok || !p.Unmap().Is4() {
-			continue
-		}
-		ones, _ := n.Mask.Size()
-		if len(n.Mask) == net.IPv6len {
-			ones -= 96
-		}
-		if netip.PrefixFrom(p.Unmap(), ones).Contains(client) {
-			return p.Unmap(), true
-		}
-		if !first.IsValid() {
-			first = p.Unmap()
-		}
-	}
-	return first, true
-}
-
-func isLocal(ip netip.Addr) bool {
-	if !ip.IsValid() || ip == netip.IPv4Unspecified() {
-		return false
-	}
-	if ip.IsLoopback() {
-		return true
-	}
-	addrs, err := net.InterfaceAddrs()
-	if err != nil {
-		return false
-	}
-	for _, a := range addrs {
-		if n, ok := a.(*net.IPNet); ok {
-			if p, ok := netip.AddrFromSlice(n.IP); ok && p.Unmap() == ip {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 type transfer struct {
@@ -219,9 +134,10 @@ type transfer struct {
 	client    netip.AddrPort
 	local     netip.Addr
 	broadcast bool
+	ip        *ipstack.Stack
 
 	ctx     context.Context
-	conn    *net.UDPConn
+	conn    net.Conn
 	timeout time.Duration
 }
 
@@ -247,11 +163,7 @@ func (t *transfer) who() string {
 
 // open creates the socket for the transfer, with a new port.
 func (t *transfer) open() error {
-	var laddr *net.UDPAddr
-	if t.local.IsValid() {
-		laddr = net.UDPAddrFromAddrPort(netip.AddrPortFrom(t.local, 0))
-	}
-	c, err := net.DialUDP("udp4", laddr, net.UDPAddrFromAddrPort(t.client))
+	c, err := t.ip.DialUDP(netip.AddrPortFrom(t.local, 0), t.client)
 	if err != nil {
 		t.log.Warn("cannot open transfer socket", "err", err)
 		return err

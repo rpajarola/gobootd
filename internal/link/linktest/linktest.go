@@ -5,7 +5,6 @@ package linktest
 import (
 	"context"
 	"errors"
-	"net/netip"
 	"slices"
 	"sync"
 
@@ -13,57 +12,18 @@ import (
 	"github.com/rpajarola/gobootd/internal/resolve"
 )
 
-// Segment is an Ethernet segment. Every frame written by a port is
-// delivered to every other port (filters are ignored).
+// Segment is an Ethernet hub: every frame written by a port is delivered to
+// every other port.
 type Segment struct {
 	mu    sync.Mutex
 	ports []*Port
-	ifs   map[string]*link.Interface
 }
 
 // NewSegment returns an empty segment.
-func NewSegment() *Segment { return &Segment{ifs: map[string]*link.Interface{}} }
+func NewSegment() *Segment { return &Segment{} }
 
-// AddInterface makes an interface available to Open.
-func (s *Segment) AddInterface(name, mac string, addrs ...string) {
-	hw, err := resolve.ParseMAC(mac)
-	if err != nil {
-		panic(err)
-	}
-	i := &link.Interface{Name: name, MAC: hw}
-	for _, a := range addrs {
-		i.Addrs = append(i.Addrs, netip.MustParsePrefix(a))
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.ifs[name] = i
-}
-
-// Open implements link.Opener.
-func (s *Segment) Open(iface, filter string) (link.Port, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	i, ok := s.ifs[iface]
-	if !ok {
-		return nil, errors.New("no such interface")
-	}
-	p := &Port{seg: s, info: i, in: make(chan []byte, 256), done: make(chan struct{})}
-	s.ports = append(s.ports, p)
-	return p, nil
-}
-
-// Interfaces implements link.Opener.
-func (s *Segment) Interfaces() ([]string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var names []string
-	for n := range s.ifs {
-		names = append(names, n)
-	}
-	return names, nil
-}
-
-// Station attaches a test client with the given MAC address.
+// Station attaches a port with the given MAC address. The port receives
+// every frame, like a promiscuous capture.
 func (s *Segment) Station(mac string) *Port {
 	hw, err := resolve.ParseMAC(mac)
 	if err != nil {

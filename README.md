@@ -37,8 +37,13 @@ example (see [`etc/bootd.hcl`](etc/bootd.hcl) for more):
 ```hcl
 root = "/srv/netboot"
 
-service "rarp" { interfaces = ["en0"] }
-service "tftp" { listen = [":69"] }
+network "lab" {
+  address = "192.168.1.250/24"   # bootd's own address on the network
+  udp     = "127.0.0.1:4712"     # frames to and from bootbridge, simh or QEMU
+}
+
+service "rarp" {}
+service "tftp" {}
 service "bootparam" {}
 service "nfs" {}
 
@@ -72,13 +77,41 @@ $ bootd explain kali tftp C0A80105.SUN4C
 The default configuration file is `/etc/bootd.hcl`. Send SIGHUP to reload
 hosts and files; service and log settings take effect on restart.
 
-RARP, RMP and ND send and receive raw Ethernet frames through libpcap, so
-bootd needs root, `CAP_NET_RAW` on Linux, or access to `/dev/bpf*` on BSD
-and macOS. TFTP needs root only to listen on port 69.
+## Networks
+
+bootd works on Ethernet frames and runs its own IP stack
+([gVisor netstack](https://gvisor.dev/docs/user_guide/networking/)) with
+its own MAC and IP address on each network. It answers ARP itself, and
+knows the MAC address of every configured host, so clients that do not
+answer ARP before their operating system runs can still be reached. It
+needs no privileges and does not touch the host's addresses or ports.
+
+A network carries frames over UDP, one Ethernet frame per datagram with no
+header. This is the format of the HECnet bridge, which simh and QEMU speak:
+
+- **Real machines**: `bootbridge` connects an interface to UDP. It is the
+  only part that needs root (or `CAP_NET_RAW`, or access to `/dev/bpf*`):
+
+  ```
+  sudo bootbridge -i en0 -listen 127.0.0.1:4711 -peer 127.0.0.1:4712
+  ```
+
+  bootd then uses `udp = "127.0.0.1:4712"` and `peers = ["127.0.0.1:4711"]`.
+  Several peers (bootd, simh, QEMU) can share one bridge.
+- **simh**: `attach xq udp:4713:127.0.0.1:4712`
+- **QEMU**: `-netdev dgram,id=n0,local.type=inet,local.host=127.0.0.1,local.port=4713,remote.type=inet,remote.host=127.0.0.1,remote.port=4712`
+
+bootd learns peers that send to it, so several emulators can talk to one
+bootd without a bridge.
+
+A network can also capture directly with `pcap = "en0"`, which needs
+privileges. On Wi-Fi, where the access point drops frames from unknown MAC
+addresses, add `mac = "interface"` to use the interface's own address (with
+an IP address of bootd's own).
 
 ## Protocol notes
 
-- **RARP** answers with the server address on the client's subnet.
+- **RARP** answers with bootd's address on the network.
 - **RMP**: clients without a host entry are matched to a class by the machine
   type their boot ROM sends (`match = { rmp_machtype = "HPS300" }`). The boot
   ROM's file list shows the host's RMP files in configuration order.
@@ -90,22 +123,22 @@ and macOS. TFTP needs root only to listen on port 69.
   ND minor number in `unit` (64 + n for `ndp<n>`).
 - **TFTP** identifies clients by IP address. A request for a path such as
   `/tftpboot/name` also matches a file named `name`. Requests sent to a
-  broadcast address are answered from the server's address on the client's
-  subnet; refusals of broadcast requests are logged but not sent, so another
-  server can answer.
+  broadcast address are answered too, but refusals of broadcast requests are
+  only logged, so another server can answer.
 
 Options for each protocol are listed in [`etc/bootd.hcl`](etc/bootd.hcl).
 
 ## Building
 
-bootd needs libpcap and cgo.
+bootd and bootbridge need libpcap and cgo.
 
 ```
-go build ./cmd/bootd
+go build ./cmd/bootd ./cmd/bootbridge
 go test ./...
 ```
 
-The filter tests use `tcpdump` and are skipped if it is not installed.
+The tests need no privileges: protocols run on an in-memory segment, and an
+end-to-end test boots a client through the daemon over UDP.
 
 ## License
 

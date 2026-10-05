@@ -13,17 +13,15 @@ import (
 	"github.com/gopacket/gopacket/pcap"
 )
 
-// Pcap opens ports with libpcap. It needs privileges to capture.
-type Pcap struct{}
-
 // readTimeout bounds how long ReadFrame waits before checking for
 // cancellation.
 const readTimeout = 250 * time.Millisecond
 
-// Open opens a capture on iface. Frames are captured in promiscuous mode,
-// because several protocols use multicast addresses the interface would
-// otherwise filter out (RMP 09:00:09:00:00:04, RPL 03:00:02:00:00:00).
-func (Pcap) Open(iface, filter string) (Port, error) {
+// OpenPcap captures on iface with libpcap, which needs privileges. It
+// receives frames for mac and multicast frames. If mac is not the
+// interface's own address, the interface is put in promiscuous mode. A nil
+// mac receives every frame, as a bridge needs.
+func OpenPcap(iface string, mac net.HardwareAddr) (Port, error) {
 	ni, err := net.InterfaceByName(iface)
 	if err != nil {
 		return nil, err
@@ -32,6 +30,7 @@ func (Pcap) Open(iface, filter string) (Port, error) {
 	if len(info.MAC) != 6 {
 		return nil, errors.New("not an Ethernet interface")
 	}
+	promisc := string(mac) != string(info.MAC)
 
 	in, err := pcap.NewInactiveHandle(iface)
 	if err != nil {
@@ -40,7 +39,7 @@ func (Pcap) Open(iface, filter string) (Port, error) {
 	defer in.CleanUp()
 	for _, set := range []func() error{
 		func() error { return in.SetSnapLen(65535) },
-		func() error { return in.SetPromisc(true) },
+		func() error { return in.SetPromisc(promisc) },
 		func() error { return in.SetTimeout(readTimeout) },
 		// Deliver frames as they arrive instead of batching them.
 		func() error { return in.SetImmediateMode(true) },
@@ -60,32 +59,17 @@ func (Pcap) Open(iface, filter string) (Port, error) {
 		h.Close()
 		return nil, fmt.Errorf("link type %s is not Ethernet", h.LinkType())
 	}
-	if err := h.SetBPFFilter(filter); err != nil {
-		h.Close()
-		return nil, fmt.Errorf("filter %q: %w", filter, err)
+	if mac != nil {
+		filter := fmt.Sprintf("ether dst %s or ether multicast", mac)
+		if err := h.SetBPFFilter(filter); err != nil {
+			h.Close()
+			return nil, fmt.Errorf("filter %q: %w", filter, err)
+		}
 	}
-	// Ignore our own transmissions. Not every platform supports this,
-	// so protocols also skip frames from the port's own address.
+	// Ignore our own transmissions. Not every platform supports this;
+	// Network also drops frames from its own address.
 	_ = h.SetDirection(pcap.DirectionIn)
 	return &pcapPort{h: h, info: info}, nil
-}
-
-// Interfaces lists the interfaces that are up, not loopback, have an
-// Ethernet address and an IPv4 address.
-func (Pcap) Interfaces() ([]string, error) {
-	ifs, err := net.Interfaces()
-	if err != nil {
-		return nil, err
-	}
-	var names []string
-	for _, i := range ifs {
-		if i.Flags&net.FlagUp == 0 || i.Flags&net.FlagLoopback != 0 || i.Flags&net.FlagBroadcast == 0 ||
-			len(i.HardwareAddr) != 6 || len(ipv4Prefixes(&i)) == 0 {
-			continue
-		}
-		names = append(names, i.Name)
-	}
-	return names, nil
 }
 
 func ipv4Prefixes(ni *net.Interface) []netip.Prefix {

@@ -13,7 +13,12 @@ import (
 )
 
 const conf = `
-service "rarp" { interfaces = ["en0"] }
+network "lan" {
+  address = "192.168.1.1/24"
+  mac     = "00:11:22:33:44:55"
+  udp     = "127.0.0.1:0" # not used: tests run on an in-memory segment
+}
+service "rarp" {}
 service "tftp" {}
 host "kali" {
   mac = "8:0:20:1:2:3"
@@ -49,12 +54,9 @@ func reply(t *testing.T, st *linktest.Port) (link.Frame, Packet, bool) {
 }
 
 func TestReply(t *testing.T) {
-	seg := linktest.NewSegment()
-	seg.AddInterface("en0", "0:11:22:33:44:55", "10.0.0.1/8", "192.168.1.1/24")
-	inv := prototest.Inventory(t, t.TempDir(), conf)
-	log := prototest.Start(t, &Server{}, "rarp", inv, seg)
-	st := seg.Station("8:0:20:1:2:3")
-	time.Sleep(20 * time.Millisecond)
+	e := prototest.Setup(t, t.TempDir(), conf)
+	log := e.Start(t, &Server{}, "rarp")
+	st := e.Segment.Station("8:0:20:1:2:3")
 
 	request(st, "8:0:20:1:2:3")
 	f, p, ok := reply(t, st)
@@ -68,7 +70,7 @@ func TestReply(t *testing.T) {
 		t.Errorf("target IP %s, want 192.168.1.5", p.TargetIP)
 	}
 	if p.SenderIP != netip.MustParseAddr("192.168.1.1") {
-		t.Errorf("server IP %s, want the address on the client's subnet 192.168.1.1", p.SenderIP)
+		t.Errorf("server IP %s, want 192.168.1.1", p.SenderIP)
 	}
 	if !log.Contains("rarp reply to kali: 192.168.1.5") {
 		t.Error("reply not logged")
@@ -76,12 +78,9 @@ func TestReply(t *testing.T) {
 }
 
 func TestDenied(t *testing.T) {
-	seg := linktest.NewSegment()
-	seg.AddInterface("en0", "0:11:22:33:44:55", "192.168.1.1/24")
-	inv := prototest.Inventory(t, t.TempDir(), conf)
-	log := prototest.Start(t, &Server{}, "rarp", inv, seg)
-	st := seg.Station("8:0:20:9:9:9")
-	time.Sleep(20 * time.Millisecond)
+	e := prototest.Setup(t, t.TempDir(), conf)
+	log := e.Start(t, &Server{}, "rarp")
+	st := e.Segment.Station("8:0:20:9:9:9")
 
 	for _, tc := range []struct{ mac, want string }{
 		{"8:0:20:9:9:9", "rarp request from 08:00:20:09:09:09 denied (client unknown)"},
@@ -106,13 +105,18 @@ func TestMarshalRoundTrip(t *testing.T) {
 	}
 }
 
-func TestFilter(t *testing.T) {
+func TestMatch(t *testing.T) {
 	hw, _ := resolve.ParseMAC("8:0:20:1:2:3")
 	req := Packet{Op: OpRequest, SenderHW: hw, TargetHW: hw}
-	if !prototest.FilterMatches(t, Filter, link.Build(link.Broadcast, hw, link.TypeRARP, req.Marshal())) {
+	if !Match(parse(link.Build(link.Broadcast, hw, link.TypeRARP, req.Marshal()))) {
 		t.Error("filter rejects a RARP request")
 	}
-	if prototest.FilterMatches(t, Filter, link.Build(link.Broadcast, hw, link.TypeARP, req.Marshal())) {
+	if Match(parse(link.Build(link.Broadcast, hw, link.TypeARP, req.Marshal()))) {
 		t.Error("filter accepts ARP")
 	}
+}
+
+func parse(b []byte) link.Frame {
+	f, _ := link.Parse(link.Pad(b))
+	return f
 }

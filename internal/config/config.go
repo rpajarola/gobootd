@@ -6,6 +6,8 @@ package config
 
 import (
 	"fmt"
+	"net"
+	"net/netip"
 	"path/filepath"
 	"slices"
 
@@ -26,6 +28,7 @@ type Config struct {
 	Root     string     `hcl:"root,optional"`
 	Log      *Log       `hcl:"log,block"`
 	Resolve  *Resolve   `hcl:"resolve,block"`
+	Networks []*Network `hcl:"network,block"`
 	Services []*Service `hcl:"service,block"`
 	Classes  []*Class   `hcl:"class,block"`
 	Hosts    []*Host    `hcl:"host,block"`
@@ -58,18 +61,47 @@ type Resolve struct {
 	DNS *bool `hcl:"dns,optional"`
 }
 
-// Service enables a boot protocol and says where it listens.
+// Network is an Ethernet segment bootd is attached to, with its own
+// Ethernet and IP address. bootd runs its own IP stack on it.
+type Network struct {
+	Name string `hcl:"name,label"`
+	// Address is bootd's IPv4 address and prefix, e.g. "192.168.1.250/24".
+	Address string `hcl:"address"`
+	// MAC is bootd's Ethernet address on the network. Empty means a
+	// locally administered address derived from the network name;
+	// "interface" means the address of the pcap interface.
+	MAC string `hcl:"mac,optional"`
+	// UDP is the address to exchange Ethernet frames on, one frame per
+	// datagram (the HECnet bridge format, as used by bootbridge, simh
+	// and QEMU).
+	UDP string `hcl:"udp,optional"`
+	// Peers are UDP addresses frames are always sent to. Other peers
+	// are learned when they send.
+	Peers []string `hcl:"peers,optional"`
+	// Pcap is a network interface to capture on directly. This needs
+	// privileges.
+	Pcap string `hcl:"pcap,optional"`
+
+	DefRange     hcl.Range `hcl:",def_range"`
+	AddressRange hcl.Range `hcl:"address,attr_range"`
+	MACRange     hcl.Range `hcl:"mac,attr_range"`
+	UDPRange     hcl.Range `hcl:"udp,attr_range"`
+	PeersRange   hcl.Range `hcl:"peers,attr_range"`
+}
+
+// MACInterface is the MAC setting that uses the interface's own address.
+const MACInterface = "interface"
+
+// Service enables a boot protocol.
 type Service struct {
 	Name string `hcl:"name,label"`
-	// Interfaces lists network interfaces for link level protocols.
-	// "all" means every interface.
-	Interfaces []string `hcl:"interfaces,optional"`
-	// Listen lists addresses for IP based protocols, e.g. ":69".
-	Listen []string `hcl:"listen,optional"`
+	// Networks the service is offered on. Defaults to all networks.
+	Networks []string `hcl:"networks,optional"`
 	// Options holds protocol specific settings.
 	Options hcl.Body `hcl:",remain"`
 
-	DefRange hcl.Range `hcl:",def_range"`
+	DefRange      hcl.Range `hcl:",def_range"`
+	NetworksRange hcl.Range `hcl:"networks,attr_range"`
 }
 
 // Class is a template for hosts. Hosts reference it with class = "name";
@@ -279,8 +311,24 @@ func (c *Config) validate() hcl.Diagnostics {
 			"Log format %q is not \"text\" or \"json\".", c.Log.Format))
 	}
 
+	nets := map[string]*Network{}
+	for _, n := range c.Networks {
+		if prev, ok := nets[n.Name]; ok {
+			diags = append(diags, errorf(n.DefRange, "Duplicate network",
+				"Network %q is already defined at %s.", n.Name, prev.DefRange))
+		}
+		nets[n.Name] = n
+		diags = append(diags, n.validate()...)
+	}
+
 	seen := map[string]*Service{}
 	for _, s := range c.Services {
+		for _, n := range s.Networks {
+			if _, ok := nets[n]; !ok {
+				diags = append(diags, errorf(s.NetworksRange, "Unknown network",
+					"Service %q uses network %q, which is not defined.", s.Name, n))
+			}
+		}
 		if !service.Known(s.Name) {
 			diags = append(diags, unknownService(s.DefRange, s.Name))
 		}
@@ -291,6 +339,11 @@ func (c *Config) validate() hcl.Diagnostics {
 		seen[s.Name] = s
 	}
 
+	if len(c.Services) > 0 && len(c.Networks) == 0 {
+		diags = append(diags, &hcl.Diagnostic{Severity: hcl.DiagWarning, Summary: "No network",
+			Detail:  "Services are enabled, but there is no network block to offer them on.",
+			Subject: c.Services[0].DefRange.Ptr()})
+	}
 	for _, cl := range c.Classes {
 		diags = append(diags, checkServices(cl.Services, cl.ServicesRange, true)...)
 		diags = append(diags, checkFiles(cl.Files)...)
@@ -300,6 +353,48 @@ func (c *Config) validate() hcl.Diagnostics {
 		diags = append(diags, checkServices(h.Services, h.ServicesRange, true)...)
 		diags = append(diags, checkFiles(h.Files)...)
 		diags = append(diags, checkDisks(h.Disks)...)
+	}
+	return diags
+}
+
+func (n *Network) validate() hcl.Diagnostics {
+	var diags hcl.Diagnostics
+	if p, err := netip.ParsePrefix(n.Address); err != nil || !p.Addr().Is4() {
+		diags = append(diags, errorf(n.AddressRange, "Invalid network address",
+			"%q is not an IPv4 address with prefix length, like \"192.168.1.250/24\".", n.Address))
+	}
+	switch {
+	case (n.UDP == "") == (n.Pcap == ""):
+		diags = append(diags, errorf(n.DefRange, "Network needs one transport",
+			"Network %q must have either udp or pcap.", n.Name))
+	case n.UDP != "":
+		if _, err := netip.ParseAddrPort(n.UDP); err != nil {
+			diags = append(diags, errorf(n.UDPRange, "Invalid UDP address",
+				"%q is not an IP address and port, like \"127.0.0.1:4711\".", n.UDP))
+		}
+	}
+	if n.Pcap == "" && len(n.Peers) > 0 {
+		for _, p := range n.Peers {
+			if _, err := netip.ParseAddrPort(p); err != nil {
+				diags = append(diags, errorf(n.PeersRange, "Invalid peer address",
+					"%q is not an IP address and port.", p))
+			}
+		}
+	} else if len(n.Peers) > 0 {
+		diags = append(diags, errorf(n.PeersRange, "Peers need udp", "Only udp networks have peers."))
+	}
+	switch {
+	case n.MAC == MACInterface:
+		if n.Pcap == "" {
+			diags = append(diags, errorf(n.MACRange, "No interface MAC",
+				"mac = %q needs a pcap interface.", MACInterface))
+		}
+	case n.MAC != "":
+		if mac, err := net.ParseMAC(n.MAC); err != nil || len(mac) != 6 {
+			diags = append(diags, errorf(n.MACRange, "Invalid MAC address", "%q is not an Ethernet address.", n.MAC))
+		} else if mac[0]&1 != 0 {
+			diags = append(diags, errorf(n.MACRange, "Invalid MAC address", "%s is a multicast address.", n.MAC))
+		}
 	}
 	return diags
 }

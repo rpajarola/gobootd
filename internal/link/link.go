@@ -71,42 +71,6 @@ type Port interface {
 	Close() error
 }
 
-// Opener opens ports. filter is a pcap filter expression that selects the
-// frames a protocol wants; implementations may deliver other frames too, so
-// protocols must check what they receive.
-type Opener interface {
-	Open(iface, filter string) (Port, error)
-	// Interfaces lists the interfaces "all" stands for.
-	Interfaces() ([]string, error)
-}
-
-// OpenAll opens a port on each named interface. "all" (or no names at all)
-// stands for every suitable interface.
-func OpenAll(o Opener, names []string, filter string) ([]Port, error) {
-	if len(names) == 0 || slices.Contains(names, "all") {
-		all, err := o.Interfaces()
-		if err != nil {
-			return nil, err
-		}
-		if len(all) == 0 {
-			return nil, errors.New("no usable Ethernet interfaces")
-		}
-		names = all
-	}
-	var ports []Port
-	for _, n := range names {
-		p, err := o.Open(n, filter)
-		if err != nil {
-			for _, p := range ports {
-				p.Close()
-			}
-			return nil, fmt.Errorf("interface %s: %w", n, err)
-		}
-		ports = append(ports, p)
-	}
-	return ports, nil
-}
-
 // Serve reads frames from every port and calls handle for each, one frame at
 // a time per port, until ctx is done or a port fails. It closes the ports
 // before returning.

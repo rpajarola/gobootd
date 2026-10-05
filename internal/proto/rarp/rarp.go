@@ -99,17 +99,17 @@ func ipString(ip netip.Addr) string {
 // Server answers RARP requests for hosts that may use rarp.
 type Server struct{}
 
-// Filter selects RARP requests.
-const Filter = "rarp"
+// Match selects RARP frames.
+var Match = link.MatchType(link.TypeRARP)
 
 // Run implements daemon.Service.
 func (s *Server) Run(ctx context.Context, env *daemon.Env) error {
-	ports, err := link.OpenAll(env.Link, env.Config.Interfaces, Filter)
+	ports, err := env.Subscribe(Match)
 	if err != nil {
 		return err
 	}
 	for _, p := range ports {
-		env.Log.Info("listening", "interface", p.Interface().Name, "mac", p.Interface().MAC.String())
+		env.Log.Info("listening", "network", p.Interface().Name)
 	}
 	return link.Serve(ctx, ports, func(p link.Port, frame []byte) { s.handle(env, p, frame) })
 }
@@ -127,7 +127,7 @@ func (s *Server) handle(env *daemon.Env, port link.Port, frame []byte) {
 	if string(f.Src) == string(iface.MAC) {
 		return
 	}
-	log := env.Log.With("interface", iface.Name, "client", req.TargetHW.String())
+	log := env.Log.With("network", iface.Name, "client", req.TargetHW.String())
 	log.Debug("received", "from", f.Src.String(), "packet", req)
 
 	// The target hardware address is the client asking; it is usually

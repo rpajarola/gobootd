@@ -13,6 +13,10 @@ resolve {
   ethers = ""
   dns    = false
 }
+network "lan" {
+  address = "192.0.2.1/24"
+  udp     = "127.0.0.1:4711"
+}
 service "rarp" {}
 service "tftp" {}
 service "rmp" {}
@@ -97,7 +101,7 @@ func TestCheckServiceOptions(t *testing.T) {
 	if code != 1 {
 		t.Errorf("exit %d, want 1", code)
 	}
-	if !strings.Contains(errs, `An argument named "blocksize" is not expected here`) || !strings.Contains(errs, "line 8") {
+	if !strings.Contains(errs, `An argument named "blocksize" is not expected here`) || !strings.Contains(errs, "line 12") {
 		t.Errorf("stderr = %q", errs)
 	}
 }

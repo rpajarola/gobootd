@@ -2,26 +2,35 @@ package tftp
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"io"
-	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/rpajarola/gobootd/internal/ipstack"
 	"github.com/rpajarola/gobootd/internal/proto/prototest"
 )
 
-const conf = `
+const lan = `
+network "lan" {
+  address = "192.168.1.1/24"
+  udp     = "127.0.0.1:0" # not used: tests run on an in-memory segment
+}
+`
+
+const conf = lan + `
 service "tftp" {
-  listen  = ["127.0.0.1:0"]
   timeout = 1
 }
 service "rarp" {}
 host "kali" {
-  ip       = "127.0.0.1"
+  ip       = "192.168.1.5"
+  mac      = "8:0:20:1:2:3"
   services = ["tftp"]
   file "sun4c" { name = "*" }
   file "boot/netbsd" { aliases = ["bsd"] }
@@ -29,7 +38,16 @@ host "kali" {
 }
 `
 
-func start(t *testing.T, conf string, files map[string][]byte) (*net.UDPAddr, *prototest.Log) {
+var server = netip.MustParseAddrPort("192.168.1.1:69")
+
+type testEnv struct {
+	*prototest.Env
+	log   *prototest.Log
+	st    *ipstack.Stack
+	ports uint16
+}
+
+func start(t *testing.T, conf string, files map[string][]byte) *testEnv {
 	dir := t.TempDir()
 	for name, data := range files {
 		p := filepath.Join(dir, name)
@@ -38,32 +56,28 @@ func start(t *testing.T, conf string, files map[string][]byte) (*net.UDPAddr, *p
 			t.Fatal(err)
 		}
 	}
-	addr := make(chan net.Addr, 1)
-	s := &Server{listening: func(a net.Addr) { addr <- a }}
-	log := prototest.Start(t, s, "tftp", prototest.Inventory(t, dir, conf), nil)
-	select {
-	case a := <-addr:
-		return a.(*net.UDPAddr), log
-	case <-time.After(time.Second):
-		t.Fatal("server did not start")
-	}
-	return nil, nil
+	e := prototest.Setup(t, dir, conf)
+	log := e.Start(t, &Server{}, "tftp")
+	st := e.Client(t, "08:00:20:01:02:03", "192.168.1.5/24")
+	return &testEnv{Env: e, log: log, st: st, ports: 2000}
 }
 
 type client struct {
 	t    *testing.T
-	conn *net.UDPConn
-	srv  *net.UDPAddr
-	peer *net.UDPAddr // transfer address
+	l    *ipstack.UDPListener
+	srv  netip.AddrPort
+	peer netip.AddrPort // transfer address
 }
 
-func dial(t *testing.T, srv *net.UDPAddr) *client {
-	c, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+// dial returns a client on a new port, sending requests to server.
+func (e *testEnv) dial(t *testing.T, srv netip.AddrPort) *client {
+	e.ports++
+	l, err := e.st.ListenUDP(e.ports)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { c.Close() })
-	return &client{t: t, conn: c, srv: srv}
+	t.Cleanup(func() { l.Close() })
+	return &client{t: t, l: l, srv: srv}
 }
 
 func (c *client) request(op uint16, name, mode string, opts ...string) {
@@ -71,26 +85,28 @@ func (c *client) request(op uint16, name, mode string, opts ...string) {
 	for _, s := range append([]string{name, mode}, opts...) {
 		b = append(append(b, s...), 0)
 	}
-	c.conn.WriteToUDP(b, c.srv)
+	if err := c.l.WriteTo(b, c.srv); err != nil {
+		c.t.Fatal(err)
+	}
 }
 
 func (c *client) recv() []byte {
-	buf := make([]byte, 70000)
-	c.conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-	n, from, err := c.conn.ReadFromUDP(buf)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	d, err := c.l.Read(ctx)
 	if err != nil {
 		return nil
 	}
-	if from.Port == c.srv.Port {
-		c.t.Errorf("reply from the listening port %v, want a new transfer port", from)
+	if d.From.Port() == 69 {
+		c.t.Errorf("reply from the listening port %v, want a new transfer port", d.From)
 	}
-	c.peer = from
-	return buf[:n]
+	c.peer = d.From
+	return d.Data
 }
 
 func (c *client) ack(block uint16) {
 	b := binary.BigEndian.AppendUint16(nil, opACK)
-	c.conn.WriteToUDP(binary.BigEndian.AppendUint16(b, block), c.peer)
+	c.l.WriteTo(binary.BigEndian.AppendUint16(b, block), c.peer)
 }
 
 // get reads a whole file, returning the data and the OACK options.
@@ -157,7 +173,8 @@ func content(n int) []byte {
 
 func TestRead(t *testing.T) {
 	files := map[string][]byte{"sun4c": content(1024), "boot/netbsd": content(3000), "text": []byte("a\nb\rc")}
-	srv, log := start(t, conf, files)
+	e := start(t, conf, files)
+	log := e.log
 
 	for _, tc := range []struct {
 		name, mode string
@@ -175,7 +192,7 @@ func TestRead(t *testing.T) {
 			oack: map[string]string{"blksize": "1468"}},
 		{name: "text", mode: "netascii", opts: []string{"tsize", "0"}, want: []byte("a\r\nb\r\x00c")},
 	} {
-		got, oack, err := dial(t, srv).get(tc.name, tc.mode, tc.opts...)
+		got, oack, err := e.dial(t, server).get(tc.name, tc.mode, tc.opts...)
 		if err != nil {
 			t.Errorf("%s %v: %v", tc.name, tc.opts, err)
 			continue
@@ -198,13 +215,14 @@ func TestRead(t *testing.T) {
 }
 
 func TestDenied(t *testing.T) {
-	srv, log := start(t, `
-service "tftp" { listen = ["127.0.0.1:0"] }
+	e := start(t, lan+`
+service "tftp" {}
 host "kali" {
-  ip = "127.0.0.1"
+  ip = "192.168.1.5"
   file "netbsd" {}
 }
 `, map[string][]byte{"netbsd": content(10)})
+	log := e.log
 
 	for _, tc := range []struct {
 		op         uint16
@@ -216,7 +234,7 @@ host "kali" {
 		{opWRQ, "netbsd", "octet", errAccess, `denied (writing is not supported)`},
 		{opRRQ, "netbsd", "mail", errIllegal, `denied (mode \"mail\" not supported)`},
 	} {
-		c := dial(t, srv)
+		c := e.dial(t, server)
 		c.request(tc.op, tc.name, tc.mode)
 		p := c.recv()
 		if p == nil || binary.BigEndian.Uint16(p) != opERROR || binary.BigEndian.Uint16(p[2:]) != tc.code {
@@ -229,8 +247,9 @@ host "kali" {
 }
 
 func TestRetransmit(t *testing.T) {
-	srv, log := start(t, conf, map[string][]byte{"sun4c": content(100)})
-	c := dial(t, srv)
+	e := start(t, conf, map[string][]byte{"sun4c": content(100)})
+	log := e.log
+	c := e.dial(t, server)
 	c.request(opRRQ, "x", "octet")
 	first := c.recv()
 	// Don't acknowledge: the server must send the block again.
@@ -264,5 +283,27 @@ func TestParseRequest(t *testing.T) {
 		if err == nil && len(r.options) != tc.opts {
 			t.Errorf("%q: options %v", tc.in, r.options)
 		}
+	}
+}
+
+func TestBroadcast(t *testing.T) {
+	e := start(t, conf, map[string][]byte{"sun4c": content(600)})
+	// Sun PROMs broadcast their request and take the first answer.
+	got, _, err := e.dial(t, netip.MustParseAddrPort("255.255.255.255:69")).get("C0A80105.SUN4C", "octet")
+	if err != nil || len(got) != 600 {
+		t.Fatalf("got %d bytes, %v", len(got), err)
+	}
+	if !e.log.Contains("broadcast=true") {
+		t.Error("broadcast not logged")
+	}
+	// Refusals of broadcast requests are not sent, so other servers can
+	// answer.
+	c := e.dial(t, netip.MustParseAddrPort("192.168.1.255:69"))
+	c.request(opWRQ, "x", "octet")
+	if p := c.recv(); p != nil {
+		t.Errorf("got %x for a refused broadcast request", p)
+	}
+	if !e.log.Contains("denied (writing is not supported)") {
+		t.Error("refusal not logged")
 	}
 }

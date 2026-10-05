@@ -17,6 +17,10 @@ resolve {
   dns    = false
 }
 log { file = "bootd.log" }
+network "lan" {
+  address = "192.168.1.1/24"
+  udp     = "127.0.0.1:0"
+}
 service "rarp" {}
 service "tftp" {}
 `

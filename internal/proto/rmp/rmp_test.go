@@ -88,14 +88,19 @@ func setup(t *testing.T, conf string) (client, *prototest.Log, string) {
 	if err := os.WriteFile(filepath.Join(dir, "SYSNESTA"), bytes.Repeat([]byte{0xab}, 1000), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	seg := linktest.NewSegment()
-	seg.AddInterface("fxp0", "00:a0:c9:00:00:01", "192.168.1.1/24")
-	inv := prototest.Inventory(t, dir, conf)
-	log := prototest.Start(t, &Server{}, "rmp", inv, seg)
-	st := seg.Station("08:00:09:21:5b:62")
-	time.Sleep(20 * time.Millisecond)
+	e := prototest.Setup(t, dir, lan+conf)
+	log := e.Start(t, &Server{}, "rmp")
+	st := e.Segment.Station("08:00:09:21:5b:62")
 	return client{t, st}, log, dir
 }
+
+const lan = `
+network "lan" {
+  address = "192.168.1.1/24"
+  mac     = "00:a0:c9:00:00:01"
+  udp     = "127.0.0.1:0" # not used: tests run on an in-memory segment
+}
+`
 
 const nesta = `
 service "rmp" {
@@ -235,12 +240,17 @@ func parseReply(b []byte) (Packet, bool) {
 	return p, ok
 }
 
-func TestFilter(t *testing.T) {
+func TestMatch(t *testing.T) {
 	src := mustMAC("08:00:09:21:5b:62")
-	if !prototest.FilterMatches(t, Filter, link.Build8023(Multicast, src, unhex(t, trace[0].req))) {
+	if !Match(parse(link.Build8023(Multicast, src, unhex(t, trace[0].req)))) {
 		t.Error("filter rejects an RMP boot request")
 	}
-	if prototest.FilterMatches(t, Filter, link.Build(Multicast, src, link.TypeIPv4, unhex(t, trace[0].req))) {
+	if Match(parse(link.Build(Multicast, src, link.TypeIPv4, unhex(t, trace[0].req)))) {
 		t.Error("filter accepts an Ethernet II frame")
 	}
+}
+
+func parse(b []byte) link.Frame {
+	f, _ := link.Parse(link.Pad(b))
+	return f
 }

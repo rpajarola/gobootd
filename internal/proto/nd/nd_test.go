@@ -15,8 +15,12 @@ import (
 )
 
 const conf = `
+network "lan" {
+  address = "192.168.1.1/24"
+  mac     = "00:a0:c9:00:00:01"
+  udp     = "127.0.0.1:0" # not used: tests run on an in-memory segment
+}
 service "nd" {
-  interfaces = ["le0"]
   send_delay = 0
 }
 host "sun2" {
@@ -51,11 +55,9 @@ func setup(t *testing.T, mac string) (*linktest.Port, *prototest.Log) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "bootyy"), boot1, 0o644)
 	os.WriteFile(filepath.Join(dir, "netboot"), boot2, 0o644)
-	seg := linktest.NewSegment()
-	seg.AddInterface("le0", "0:a0:c9:0:0:1", "192.168.1.1/24")
-	log := prototest.Start(t, &Server{}, "nd", prototest.Inventory(t, dir, conf), seg)
-	time.Sleep(20 * time.Millisecond)
-	return seg.Station(mac), log
+	e := prototest.Setup(t, dir, conf)
+	log := e.Start(t, &Server{}, "nd")
+	return e.Segment.Station(mac), log
 }
 
 func send(st *linktest.Port, src, dst netip.Addr, p Packet) {
@@ -187,15 +189,20 @@ func TestChecksum(t *testing.T) {
 	}
 }
 
-func TestFilter(t *testing.T) {
+func TestMatch(t *testing.T) {
 	zero := netip.IPv4Unspecified()
 	src := []byte{8, 0, 0x20, 0, 0, 1}
 	nd := buildIPv4(1, zero, zero, IPProto, Packet{Op: OpRead, Count: 512}.marshal())
-	if !prototest.FilterMatches(t, Filter, link.Build(link.Broadcast, src, link.TypeIPv4, nd)) {
+	if !Match(parse(link.Build(link.Broadcast, src, link.TypeIPv4, nd))) {
 		t.Error("filter rejects an ND request")
 	}
 	udp := buildIPv4(1, zero, zero, 17, Packet{}.marshal())
-	if prototest.FilterMatches(t, Filter, link.Build(link.Broadcast, src, link.TypeIPv4, udp)) {
+	if Match(parse(link.Build(link.Broadcast, src, link.TypeIPv4, udp))) {
 		t.Error("filter accepts UDP")
 	}
+}
+
+func parse(b []byte) link.Frame {
+	f, _ := link.Parse(link.Pad(b))
+	return f
 }

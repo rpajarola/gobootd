@@ -32,8 +32,10 @@ import (
 
 func init() { daemon.Register(service.ND, func() daemon.Service { return &Server{} }) }
 
-// Filter selects ND packets.
-const Filter = "ip proto 77"
+// Match selects ND packets.
+func Match(f link.Frame) bool {
+	return f.Type == link.TypeIPv4 && len(f.Payload) >= 20 && f.Payload[9] == IPProto
+}
 
 // Bootfile disk layout.
 const (
@@ -69,12 +71,12 @@ func (s *Server) Run(ctx context.Context, env *daemon.Env) error {
 		d := 10
 		s.opts.SendDelay = &d
 	}
-	ports, err := link.OpenAll(env.Link, env.Config.Interfaces, Filter)
+	ports, err := env.Subscribe(Match)
 	if err != nil {
 		return err
 	}
 	for _, p := range ports {
-		env.Log.Info("listening", "interface", p.Interface().Name, "mac", p.Interface().MAC.String())
+		env.Log.Info("listening", "network", p.Interface().Name)
 	}
 	return link.Serve(ctx, ports, func(p link.Port, frame []byte) { s.handle(ctx, env, p, frame) })
 }
@@ -93,7 +95,7 @@ func (s *Server) handle(ctx context.Context, env *daemon.Env, port link.Port, fr
 	if !ok {
 		return
 	}
-	log := env.Log.With("interface", iface.Name, "client", f.Src.String())
+	log := env.Log.With("network", iface.Name, "client", f.Src.String())
 	log.Debug("received", "src", ip.src, "dst", ip.dst, "packet", req)
 
 	h, err := env.Inventory().ByMAC(f.Src)

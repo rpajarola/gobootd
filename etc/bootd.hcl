@@ -1,8 +1,9 @@
 # bootd configuration
 #
-# Hosts say which services they may use and which files they may load.
-# Services say where bootd listens. Addresses that are not given are looked
-# up in /etc/ethers (MAC) and DNS / /etc/hosts (IP).
+# Networks say how bootd reaches its clients, services which protocols it
+# offers, and hosts which services they may use and which files they may
+# load. Host addresses that are not given are looked up in /etc/ethers (MAC)
+# and DNS / /etc/hosts (IP).
 #
 # Check a configuration with:   bootd check -c bootd.hcl
 # Trace a single request with:  bootd explain -c bootd.hcl kali tftp C0A80105.SUN4C
@@ -22,20 +23,41 @@ resolve {
   dns    = true
 }
 
-# Link level services (rarp, rmp, nd) capture with libpcap and need root,
-# or CAP_NET_RAW on Linux. interfaces defaults to all Ethernet interfaces.
-service "rarp" { interfaces = ["en0"] }
+# bootd has its own Ethernet and IP address on each network and runs its
+# own IP stack there, so it needs no privileges and does not use the host's
+# addresses. Frames travel over UDP, one frame per datagram (the HECnet
+# bridge format), to and from:
+#   - bootbridge, which connects a real interface:
+#       sudo bootbridge -i en0 -listen 127.0.0.1:4711 -peer 127.0.0.1:4712
+#   - simh:  attach xq udp:4713:127.0.0.1:4712
+#   - QEMU:  -netdev dgram,id=n0,local.type=inet,local.host=127.0.0.1,local.port=4713,
+#              remote.type=inet,remote.host=127.0.0.1,remote.port=4712
+# Peers that send to bootd are learned, so several emulators can share it.
+network "lab" {
+  address = "192.168.1.250/24"
+  udp     = "127.0.0.1:4712"
+  peers   = ["127.0.0.1:4711"]   # bootbridge
+  # mac   = "02:00:00:00:00:01"  # default: derived from the network name
+}
+# A network can also capture directly with libpcap, which needs root:
+# network "wired" {
+#   address = "192.168.2.250/24"
+#   pcap    = "en0"
+#   mac     = "interface"        # use the interface's own address (needed on Wi-Fi)
+# }
+
+# Services are offered on every network unless networks = [...] says
+# otherwise.
+service "rarp" {}
 service "rmp" {
-  interfaces = ["all"]
   # server_name = "aiax"   # sent to clients asking for the server; default: host name
 }
 service "nd" {
-  interfaces = ["en0"]
   # window     = 6         # 1 KB packets per acknowledgement
   # send_delay = 10        # milliseconds before each packet
 }
 service "tftp" {
-  listen = [":69"]
+  # port        = 69
   # timeout     = 2        # seconds before retransmitting
   # retries     = 5
   # max_blksize = 1468     # largest blksize option accepted

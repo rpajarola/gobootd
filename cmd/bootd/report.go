@@ -26,6 +26,20 @@ func check(path string, quiet bool, stdout, stderr io.Writer) int {
 	if !quiet {
 		inv := l.Inventory
 		fmt.Fprintf(stdout, "root      %s\nservices  %s\n", inv.Root, strings.Join(inv.ServiceNames(), " "))
+		for _, n := range l.Config.Networks {
+			via := "udp " + n.UDP
+			if n.Pcap != "" {
+				via = "pcap " + n.Pcap
+			}
+			if len(n.Peers) > 0 {
+				via += ", peers " + strings.Join(n.Peers, " ")
+			}
+			mac := n.MAC
+			if mac == "" {
+				mac = "derived"
+			}
+			fmt.Fprintf(stdout, "network   %s  %s  mac %s  via %s\n", n.Name, n.Address, mac, via)
+		}
 		for _, h := range inv.Hosts {
 			fmt.Fprintln(stdout)
 			printHost(stdout, h)

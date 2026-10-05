@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/rpajarola/gobootd/internal/diag"
 	"github.com/rpajarola/gobootd/internal/inventory"
 	"github.com/rpajarola/gobootd/internal/link"
+	"github.com/rpajarola/gobootd/internal/netif"
 	"github.com/rpajarola/gobootd/internal/resolve"
 	"github.com/rpajarola/gobootd/internal/service"
 )
@@ -30,8 +32,21 @@ type Env struct {
 	// Config is the service's block from the configuration. Changes to
 	// it take effect on restart.
 	Config *config.Service
-	// Link opens raw Ethernet ports.
-	Link link.Opener
+	// Networks the service is offered on.
+	Networks []*netif.Network
+}
+
+// Subscribe returns a port on each of the service's networks that receives
+// the frames match accepts.
+func (e *Env) Subscribe(match func(link.Frame) bool) ([]link.Port, error) {
+	if len(e.Networks) == 0 {
+		return nil, errors.New("no network")
+	}
+	var ports []link.Port
+	for _, n := range e.Networks {
+		ports = append(ports, n.Subscribe(match))
+	}
+	return ports, nil
 }
 
 // Service is a boot protocol implementation.
@@ -48,8 +63,8 @@ type Configurable interface {
 	Options() any
 }
 
-// LinkOpener is the Opener services get in Env.Link.
-var LinkOpener link.Opener = link.Pcap{}
+// OpenNetwork opens a configured network; tests replace it.
+var OpenNetwork = netif.Open
 
 var (
 	mu       sync.Mutex
@@ -136,13 +151,31 @@ func Run(ctx context.Context, path string, reload <-chan struct{}, stderr io.Wri
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	var wg sync.WaitGroup
+	defer wg.Wait()
+	nets := map[string]*netif.Network{}
+	for _, c := range l.Config.Networks {
+		n, err := OpenNetwork(c)
+		if err != nil {
+			cancel(nil)
+			return err
+		}
+		nets[c.Name] = n
+		n.SetHosts(l.Inventory)
+		log.Info("network up", "network", c.Name, "address", n.Addr().String(), "mac", n.Interface().MAC.String(), "transport", n.Transport().Interface().Name)
+		wg.Go(func() {
+			if err := n.Run(ctx); err != nil && ctx.Err() == nil {
+				cancel(fmt.Errorf("network %s: %w", c.Name, err))
+			}
+		})
+	}
 	for _, name := range l.Inventory.ServiceNames() {
 		factory, ok := lookup(name)
 		if !ok {
 			log.Warn("service not implemented yet", "service", name)
 			continue
 		}
-		env := &Env{Inventory: inv.Load, Log: logs.For(name), Config: l.Inventory.Services[name], Link: LinkOpener}
+		env := &Env{Inventory: inv.Load, Log: logs.For(name), Config: l.Inventory.Services[name]}
+		env.Networks = serviceNetworks(l.Config, env.Config, nets)
 		svc := factory()
 		DecodeOptions(svc, env.Config) // already checked by Load
 		wg.Add(1)
@@ -165,6 +198,9 @@ func Run(ctx context.Context, path string, reload <-chan struct{}, stderr io.Wri
 				continue
 			}
 			inv.Store(n.Inventory)
+			for _, net := range nets {
+				net.SetHosts(n.Inventory)
+			}
 			log.Info("configuration reloaded; service and log settings take effect on restart", "hosts", len(n.Inventory.Hosts))
 		case <-ctx.Done():
 			wg.Wait()
@@ -175,6 +211,18 @@ func Run(ctx context.Context, path string, reload <-chan struct{}, stderr io.Wri
 			return nil
 		}
 	}
+}
+
+// serviceNetworks returns the networks a service is offered on: those it
+// names, or all.
+func serviceNetworks(cfg *config.Config, s *config.Service, nets map[string]*netif.Network) []*netif.Network {
+	var out []*netif.Network
+	for _, c := range cfg.Networks {
+		if len(s.Networks) == 0 || slices.Contains(s.Networks, c.Name) {
+			out = append(out, nets[c.Name])
+		}
+	}
+	return out
 }
 
 // DecodeOptions decodes the options in the service block into svc. A

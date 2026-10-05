@@ -6,10 +6,15 @@ part of the repository; each test is skipped unless its image is given.
 
 | Test | Machine | Needs |
 |---|---|---|
-| `TestSPARCstation5` | SPARCstation 5 (OBP 2.x): RARP, TFTP | `GOBOOTD_SS5_PROM`, `qemu-system-sparc` |
+| `TestSPARCstation5` | SPARCstation 5 (OBP 2.x): RARP, TFTP | `roms/ss5.bin`, `qemu-system-sparc` |
+
+Put PROM images in `roms/` and emulator builds in `bin/`; both directories
+are ignored by git. Environment variables override them
+(`GOBOOTD_SS5_PROM`, `GOBOOTD_QEMU_SPARC`), and without a build in `bin/`
+the emulator is taken from `PATH`.
 
 ```
-GOBOOTD_SS5_PROM=~/roms/ss5.bin go test ./test/emulator
+go test ./test/emulator
 ```
 
 ## QEMU 10.2 and later
@@ -32,7 +37,7 @@ patch -p1 < .../test/emulator/qemu-pcnet-loopback.patch
 mkdir build && cd build
 ../configure --target-list=sparc-softmmu --disable-docs
 ninja qemu-system-sparc
-GOBOOTD_QEMU_SPARC=$PWD/qemu-system-sparc GOBOOTD_SS5_PROM=... go test ./test/emulator
+cp qemu-system-sparc .../test/emulator/bin/
 ```
 
 ## The boot program

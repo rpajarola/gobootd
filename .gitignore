@@ -1,2 +1,3 @@
 /bootd
-roms/
+/test/emulator/bin/
+/test/emulator/roms/

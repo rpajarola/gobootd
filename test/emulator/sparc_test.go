@@ -57,6 +57,20 @@ func helloSPARC(msg string) []byte {
 	return append(b, text...)
 }
 
+// local returns the file named by the environment variable env, or the
+// file at path (relative to this directory) if it exists, or "".
+func local(env, path string) string {
+	if v := os.Getenv(env); v != "" {
+		return v
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		if _, err := os.Stat(abs); err == nil {
+			return abs
+		}
+	}
+	return ""
+}
+
 func freePort(t *testing.T) netip.AddrPort {
 	c, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {
@@ -70,17 +84,18 @@ func freePort(t *testing.T) netip.AddrPort {
 // the PROM gets its address with RARP, loads the boot program with TFTP and
 // runs it.
 //
-//	GOBOOTD_SS5_PROM=ss5.bin go test ./test/emulator
+// The PROM image is roms/ss5.bin or GOBOOTD_SS5_PROM.
 //
 // QEMU 10.2 and later pad loopback frames, which fails the PROM's LANCE
-// loopback self-test; GOBOOTD_QEMU_SPARC can name a fixed or older
-// qemu-system-sparc.
+// loopback self-test. The test uses bin/qemu-system-sparc (a patched build)
+// or GOBOOTD_QEMU_SPARC if there is one, and qemu-system-sparc from PATH
+// otherwise.
 func TestSPARCstation5(t *testing.T) {
-	prom := os.Getenv("GOBOOTD_SS5_PROM")
+	prom := local("GOBOOTD_SS5_PROM", "roms/ss5.bin")
 	if prom == "" {
-		t.Skip("GOBOOTD_SS5_PROM not set")
+		t.Skip("no PROM image: put it in roms/ss5.bin or set GOBOOTD_SS5_PROM")
 	}
-	qemu := os.Getenv("GOBOOTD_QEMU_SPARC")
+	qemu := local("GOBOOTD_QEMU_SPARC", "bin/qemu-system-sparc")
 	if qemu == "" {
 		var err error
 		if qemu, err = exec.LookPath("qemu-system-sparc"); err != nil {
@@ -161,7 +176,7 @@ host "ss5" {
 		case strings.Contains(line, msg):
 			return // booted and ran our program
 		case strings.Contains(line, "Wrong packet length"):
-			t.Fatalf("the PROM's LANCE loopback test failed: this QEMU pads loopback frames (QEMU 10.2 and later); set GOBOOTD_QEMU_SPARC to a fixed qemu-system-sparc\n%s", console.String())
+			t.Fatalf("the PROM's LANCE loopback test failed: %s pads loopback frames (QEMU 10.2 and later); see README.md for a patched build in bin/\n%s", qemu, console.String())
 		case strings.Contains(line, "Instruction Access Exception"),
 			strings.Contains(line, "Can't open boot device"),
 			strings.Contains(line, "Timeout waiting for ARP/RARP packet"):

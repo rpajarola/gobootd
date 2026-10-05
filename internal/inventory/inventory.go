@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"path"
 	"slices"
 	"strings"
 
@@ -82,9 +83,12 @@ type File struct {
 
 // Disk is a block device image.
 type Disk struct {
-	Name     string
-	Path     string
-	Mode     string
+	Name string
+	Path string
+	Mode string
+	// Boot2 is the second-stage boot program of a bootfile disk, or
+	// empty.
+	Boot2    string
 	Unit     int
 	Writable bool
 	Origin   hcl.Range
@@ -150,6 +154,33 @@ func (inv *Inventory) MatchClass(key, value string) *Class {
 		}
 	}
 	return nil
+}
+
+// HostFromClass returns a host for a client that has no host entry but was
+// matched to class cl, e.g. by its RMP machine type. The host is not added
+// to the inventory.
+func (inv *Inventory) HostFromClass(cl *Class, mac net.HardwareAddr) *Host {
+	h := &Host{
+		Name:      cl.Name + "@" + mac.String(),
+		MAC:       mac,
+		MACSource: "request",
+		Class:     cl,
+		Files:     cl.Files,
+		Disks:     cl.Disks,
+		Exports:   cl.Exports,
+		Shares:    cl.Shares,
+		Origin:    cl.Origin,
+	}
+	if cl.Services == nil || slices.Contains(cl.Services, "all") {
+		h.Services = inv.ServiceNames()
+	} else {
+		for _, n := range inv.ServiceNames() {
+			if slices.Contains(cl.Services, n) {
+				h.Services = append(h.Services, n)
+			}
+		}
+	}
+	return h
 }
 
 // Allows checks whether the host may use svc.
@@ -238,6 +269,25 @@ func (h *Host) File(svc, name string) (*File, MatchKind, error) {
 		return nil, MatchNone, denied("file %q not configured for this host", name)
 	}
 	return best, bestKind, nil
+}
+
+// FileIgnoringDir is File for clients that ask for paths such as
+// /tftpboot/name or /hp-ux: if name has a directory and only matches a
+// wildcard (or nothing), the name without its directory is tried too.
+func (h *Host) FileIgnoringDir(svc, name string) (*File, MatchKind, error) {
+	f, kind, err := h.File(svc, name)
+	if (err == nil && kind < MatchWildcard) || !strings.Contains(name, "/") {
+		return f, kind, err
+	}
+	for _, alt := range []string{strings.TrimLeft(name, "/"), path.Base(name)} {
+		if alt == "" || alt == "/" || alt == "." {
+			continue
+		}
+		if af, akind, aerr := h.File(svc, alt); aerr == nil && (err != nil || akind < kind) {
+			f, kind, err = af, akind, nil
+		}
+	}
+	return f, kind, err
 }
 
 // FilesFor lists the files svc may serve to the host, in lookup order.

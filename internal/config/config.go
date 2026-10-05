@@ -128,12 +128,16 @@ type Disk struct {
 	Path string `hcl:"path"`
 	// Mode is "image" (a disk image) or "bootfile" (a boot program served
 	// as the first blocks of a virtual disk).
-	Mode     string `hcl:"mode,optional"`
+	Mode string `hcl:"mode,optional"`
+	// Boot2 is a second-stage boot program for bootfile disks, served
+	// from block 16 on, after the first-stage program in Path.
+	Boot2    string `hcl:"boot2,optional"`
 	Unit     int    `hcl:"unit,optional"`
 	Writable bool   `hcl:"writable,optional"`
 
-	DefRange  hcl.Range `hcl:",def_range"`
-	ModeRange hcl.Range `hcl:"mode,attr_range"`
+	DefRange   hcl.Range `hcl:",def_range"`
+	ModeRange  hcl.Range `hcl:"mode,attr_range"`
+	Boot2Range hcl.Range `hcl:"boot2,attr_range"`
 }
 
 // Export is a directory or file served over NFS and announced by bootparam.
@@ -201,6 +205,9 @@ func decode(body hcl.Body, filename string) (*Config, hcl.Diagnostics) {
 
 func (c *Config) defaults() hcl.Diagnostics {
 	base := filepath.Dir(c.Filename)
+	if abs, err := filepath.Abs(base); err == nil {
+		base = abs
+	}
 	switch {
 	case c.Root == "":
 		c.Root = base
@@ -324,6 +331,14 @@ func checkDisks(disks []*Disk) hcl.Diagnostics {
 		if d.Mode != DiskImage && d.Mode != DiskBootfile {
 			diags = append(diags, errorf(d.ModeRange, "Invalid disk mode",
 				"Disk mode %q is not %q or %q.", d.Mode, DiskImage, DiskBootfile))
+		}
+		if d.Boot2 != "" && d.Mode != DiskBootfile {
+			diags = append(diags, errorf(d.Boot2Range, "boot2 needs bootfile mode",
+				"Only disks with mode = %q have a second-stage boot program.", DiskBootfile))
+		}
+		if d.Writable && d.Mode == DiskBootfile {
+			diags = append(diags, errorf(d.DefRange, "Bootfile disk is read only",
+				"Disks with mode = %q cannot be writable.", DiskBootfile))
 		}
 	}
 	return diags

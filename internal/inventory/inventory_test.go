@@ -181,6 +181,69 @@ host "kali" {
 	}
 }
 
+func TestFileIgnoringDir(t *testing.T) {
+	inv := mustBuild(t, `
+service "tftp" {}
+host "kali" {
+  file "sparc/solaris" { name = "*" }
+  file "sparc/openbsd-2.8" { aliases = ["bsd"] }
+}
+`, "sparc/solaris", "sparc/openbsd-2.8")
+	h, _ := inv.ByName("kali")
+	for _, tc := range []struct {
+		name, want string
+		kind       MatchKind
+	}{
+		{"/tftpboot/bsd", "sparc/openbsd-2.8", MatchAlias},
+		{"/openbsd-2.8", "sparc/openbsd-2.8", MatchName},
+		{"sparc/openbsd-2.8", "sparc/openbsd-2.8", MatchPath},
+		{"/tftpboot/C0000205.SUN4C", "sparc/solaris", MatchWildcard},
+		{"bsd", "sparc/openbsd-2.8", MatchAlias},
+	} {
+		f, kind, err := h.FileIgnoringDir("tftp", tc.name)
+		if err != nil {
+			t.Errorf("FileIgnoringDir(%q): %v", tc.name, err)
+			continue
+		}
+		if f.Label != tc.want || kind != tc.kind {
+			t.Errorf("FileIgnoringDir(%q) = %s by %s, want %s by %s", tc.name, f.Label, kind, tc.want, tc.kind)
+		}
+	}
+}
+
+func TestHostFromClass(t *testing.T) {
+	inv := mustBuild(t, `
+service "rmp" {}
+service "nfs" {}
+service "tftp" {}
+class "hp300" {
+  match    = { rmp_machtype = "HPS300" }
+  services = ["rmp", "nfs", "bootparam"]
+  file "netbsd" {}
+}
+host "nesta" {
+  mac      = "0:0:0:0:0:1"
+  ip       = "192.0.2.1"
+  services = ["rmp", "tftp"]
+}
+`, "netbsd")
+	mac, _ := resolve.ParseMAC("8:0:9:21:5b:62")
+	h := inv.HostFromClass(inv.MatchClass("rmp_machtype", "HPS300"), mac)
+	if h.Name != "hp300@08:00:09:21:5b:62" || h.MAC.String() != mac.String() {
+		t.Errorf("host %s %s", h.Name, h.MAC)
+	}
+	// Only enabled services.
+	if strings.Join(h.Services, " ") != "rmp nfs" {
+		t.Errorf("services %v, want rmp nfs", h.Services)
+	}
+	if f, _, err := h.File("rmp", "netbsd"); err != nil || f.Label != "netbsd" {
+		t.Errorf("File(netbsd) = %v, %v", f, err)
+	}
+	if _, err := inv.ByMAC(mac); err == nil {
+		t.Error("host from class was added to the inventory")
+	}
+}
+
 func TestFileNotFound(t *testing.T) {
 	inv := mustBuild(t, `
 service "tftp" {}

@@ -11,10 +11,12 @@ import (
 	"sync/atomic"
 
 	"github.com/hashicorp/hcl/v2"
+	"github.com/hashicorp/hcl/v2/gohcl"
 
 	"github.com/rpajarola/gobootd/internal/config"
 	"github.com/rpajarola/gobootd/internal/diag"
 	"github.com/rpajarola/gobootd/internal/inventory"
+	"github.com/rpajarola/gobootd/internal/link"
 	"github.com/rpajarola/gobootd/internal/resolve"
 	"github.com/rpajarola/gobootd/internal/service"
 )
@@ -28,6 +30,8 @@ type Env struct {
 	// Config is the service's block from the configuration. Changes to
 	// it take effect on restart.
 	Config *config.Service
+	// Link opens raw Ethernet ports.
+	Link link.Opener
 }
 
 // Service is a boot protocol implementation.
@@ -36,6 +40,16 @@ type Service interface {
 	// service could not start or failed permanently.
 	Run(ctx context.Context, env *Env) error
 }
+
+// Configurable is implemented by services that take options in their
+// service block. Options returns a pointer to a struct with hcl tags; it
+// is decoded before Run.
+type Configurable interface {
+	Options() any
+}
+
+// LinkOpener is the Opener services get in Env.Link.
+var LinkOpener link.Opener = link.Pcap{}
 
 var (
 	mu       sync.Mutex
@@ -88,6 +102,11 @@ func Load(path string) *Loaded {
 	}
 	inv, d := inventory.Build(cfg, r)
 	l.Diags = append(l.Diags, d...)
+	for _, s := range cfg.Services {
+		if factory, ok := lookup(s.Name); ok {
+			l.Diags = append(l.Diags, DecodeOptions(factory(), s)...)
+		}
+	}
 	if !l.Diags.HasErrors() {
 		l.Inventory = inv
 	}
@@ -123,11 +142,13 @@ func Run(ctx context.Context, path string, reload <-chan struct{}, stderr io.Wri
 			log.Warn("service not implemented yet", "service", name)
 			continue
 		}
-		env := &Env{Inventory: inv.Load, Log: logs.For(name), Config: l.Inventory.Services[name]}
+		env := &Env{Inventory: inv.Load, Log: logs.For(name), Config: l.Inventory.Services[name], Link: LinkOpener}
+		svc := factory()
+		DecodeOptions(svc, env.Config) // already checked by Load
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := factory().Run(ctx, env); err != nil && ctx.Err() == nil {
+			if err := svc.Run(ctx, env); err != nil && ctx.Err() == nil {
 				cancel(fmt.Errorf("service %s: %w", name, err))
 			}
 		}()
@@ -154,6 +175,16 @@ func Run(ctx context.Context, path string, reload <-chan struct{}, stderr io.Wri
 			return nil
 		}
 	}
+}
+
+// DecodeOptions decodes the options in the service block into svc. A
+// service without options rejects any.
+func DecodeOptions(svc Service, s *config.Service) hcl.Diagnostics {
+	var opts any = &struct{}{}
+	if c, ok := svc.(Configurable); ok {
+		opts = c.Options()
+	}
+	return gohcl.DecodeBody(s.Options, nil, opts)
 }
 
 func logDiags(log *slog.Logger, diags hcl.Diagnostics) {

@@ -13,6 +13,12 @@ import (
 
 	"github.com/rpajarola/gobootd/internal/config"
 	"github.com/rpajarola/gobootd/internal/daemon"
+
+	// Protocols register themselves with the daemon.
+	_ "github.com/rpajarola/gobootd/internal/proto/nd"
+	_ "github.com/rpajarola/gobootd/internal/proto/rarp"
+	_ "github.com/rpajarola/gobootd/internal/proto/rmp"
+	_ "github.com/rpajarola/gobootd/internal/proto/tftp"
 )
 
 const usage = `usage:

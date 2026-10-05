@@ -19,7 +19,7 @@ import (
 // Services that identify clients by MAC address, and services that need to
 // know the client's IP address.
 var (
-	needsMAC = []string{service.RARP, service.RMP, service.MOP, service.RPL, service.DHCP, service.RBCS}
+	needsMAC = []string{service.RARP, service.RMP, service.MOP, service.ND, service.RPL, service.DHCP, service.RBCS}
 	needsIP  = []string{service.RARP, service.ND, service.TFTP, service.Bootparam, service.NFS, service.SMB}
 )
 
@@ -62,6 +62,10 @@ func Build(cfg *config.Config, r resolve.Resolver) (*Inventory, hcl.Diagnostics)
 		used := false
 		for _, h := range b.inv.Hosts {
 			used = used || slices.Contains(h.Services, svc)
+		}
+		// Classes with a match serve clients that have no host entry.
+		for _, c := range b.inv.Classes {
+			used = used || len(c.Match) > 0 && (c.Services == nil || slices.Contains(c.Services, "all") || slices.Contains(c.Services, svc))
 		}
 		if !used {
 			s := b.inv.Services[svc]
@@ -239,6 +243,15 @@ func (b *builder) checkHost(h *Host) {
 		}
 		units[d.Unit] = d
 	}
+	for _, d := range h.Disks {
+		if d.Mode != config.DiskBootfile {
+			continue
+		}
+		// Blocks 1-15 of a bootfile disk hold the first stage.
+		if st, err := os.Stat(d.Path); err == nil && st.Size() > 15*512 {
+			b.warn(&d.Origin, "Boot program too large", "%s is %d bytes, but the first-stage boot program of a bootfile disk must fit in 15 blocks (7680 bytes); use boot2 for the rest.", d.Path, st.Size())
+		}
+	}
 	unused := func(n int, kind string, svcs ...string) {
 		if n > 0 && intersect(h.Services, svcs) == nil {
 			b.warn(&h.Origin, "Unused "+kind, "Host %q has %s entries, but may not use %s.", h.Name, kind, strings.Join(svcs, " or "))
@@ -279,6 +292,10 @@ func (b *builder) disks(cs []*config.Disk) []*Disk {
 	for _, c := range cs {
 		d := &Disk{Name: c.Name, Path: b.path(c.Path), Mode: c.Mode, Unit: c.Unit, Writable: c.Writable, Origin: c.DefRange}
 		b.exists(d.Path, &c.DefRange)
+		if c.Boot2 != "" {
+			d.Boot2 = b.path(c.Boot2)
+			b.exists(d.Boot2, &c.Boot2Range)
+		}
 		out = append(out, d)
 	}
 	return out

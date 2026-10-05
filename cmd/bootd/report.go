@@ -65,6 +65,9 @@ func printHost(w io.Writer, h *inventory.Host) {
 	}
 	for _, d := range h.Disks {
 		fmt.Fprintf(tw, "  disk\t%s (unit %d, %s%s)\t%s%s\n", d.Name, d.Unit, d.Mode, rw(d.Writable), d.Path, missing(d.Path))
+		if d.Boot2 != "" {
+			fmt.Fprintf(tw, "  \t  boot2\t%s%s\n", d.Boot2, missing(d.Boot2))
+		}
 	}
 	for _, e := range h.Exports {
 		server := ""
@@ -145,7 +148,7 @@ func explain(path string, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 3 {
 		name = args[2]
 	}
-	f, kind, err := h.File(svc, name)
+	f, kind, err := h.FileIgnoringDir(svc, name)
 	if err != nil {
 		fmt.Fprintf(stdout, "%s request from %s denied (%v)\n", svc, h.Name, err)
 		if fs := h.FilesFor(svc); len(fs) > 0 {

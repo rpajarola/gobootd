@@ -22,17 +22,32 @@ resolve {
   dns    = true
 }
 
+# Link level services (rarp, rmp, nd) capture with libpcap and need root,
+# or CAP_NET_RAW on Linux. interfaces defaults to all Ethernet interfaces.
 service "rarp" { interfaces = ["en0"] }
-service "rmp" { interfaces = ["all"] }
-service "nd" { interfaces = ["en0"] }
-service "tftp" { listen = [":69"] }
+service "rmp" {
+  interfaces = ["all"]
+  # server_name = "aiax"   # sent to clients asking for the server; default: host name
+}
+service "nd" {
+  interfaces = ["en0"]
+  # window     = 6         # 1 KB packets per acknowledgement
+  # send_delay = 10        # milliseconds before each packet
+}
+service "tftp" {
+  listen = [":69"]
+  # timeout     = 2        # seconds before retransmitting
+  # retries     = 5
+  # max_blksize = 1468     # largest blksize option accepted
+}
 service "bootparam" {}
 service "nfs" {}
 
-# HP 9000/300: RMP picks the class by the machine type the boot ROM sends,
-# so new machines boot without a host entry.
+# HP 9000/300 and /400: RMP picks the class by the machine type the boot
+# ROM sends (an HP 425t sends "HPS300"), so new machines boot without a host
+# entry. The boot ROM lists the files by their names.
 class "hp300" {
-  match    = { rmp_machtype = "HP9000/425" }
+  match    = { rmp_machtype = "HPS300" }
   services = ["rmp", "rarp", "bootparam", "nfs"]
 
   file "files/hp300/hp300-netbsd-1.5.2-uboot" {
@@ -73,13 +88,18 @@ host "kali" {
   }
 }
 
-# Sun-2: RARP, then the PROM reads the boot program over ND.
+# Sun-2: the PROM reads blocks 0-15 of ND public unit 0 (ndp0) without
+# knowing its IP address; ND identifies it by MAC and tells it. A bootfile
+# disk serves the first-stage program in blocks 1-15 and boot2 from block 16
+# on, like NetBSD's ndbootd. The second stage then uses RARP, bootparam and
+# NFS.
 host "sun2" {
   services = ["rarp", "nd", "bootparam", "nfs"]
 
   disk "boot" {
-    path = "files/sun2/netbsd-netboot"
-    mode = "bootfile"
+    path  = "files/sun2/bootyy"
+    boot2 = "files/sun2/netboot"
+    mode  = "bootfile"
   }
   export "root" { path = "/export/hosts/sun2/root" }
 }

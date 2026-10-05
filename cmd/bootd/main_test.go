@@ -91,6 +91,17 @@ func TestCheckErrors(t *testing.T) {
 	}
 }
 
+func TestCheckServiceOptions(t *testing.T) {
+	path := setup(t, strings.Replace(testConfig, `service "tftp" {}`, "service \"tftp\" {\n  blocksize = 1024\n}", 1))
+	code, _, errs := runCmd("check", "-c", path)
+	if code != 1 {
+		t.Errorf("exit %d, want 1", code)
+	}
+	if !strings.Contains(errs, `An argument named "blocksize" is not expected here`) || !strings.Contains(errs, "line 8") {
+		t.Errorf("stderr = %q", errs)
+	}
+}
+
 func TestExplain(t *testing.T) {
 	path := setup(t, testConfig)
 	for _, tc := range []struct {

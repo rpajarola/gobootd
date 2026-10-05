@@ -50,6 +50,8 @@ func TestParseErrors(t *testing.T) {
 		{"unknown file service", "host \"a\" {\n  file \"x\" {\n    services = [\"all\"]\n  }\n}", `"all" is not a known service`, 3},
 		{"bad log level", "log {\n  level = \"loud\"\n}", "not one of", 2},
 		{"bad disk mode", "host \"a\" {\n  disk \"d\" {\n    path = \"x\"\n    mode = \"tape\"\n  }\n}", "Disk mode", 4},
+		{"boot2 without bootfile", "host \"a\" {\n  disk \"d\" {\n    path = \"x\"\n    boot2 = \"y\"\n  }\n}", "bootfile", 4},
+		{"writable bootfile", "host \"a\" {\n  disk \"d\" {\n    path = \"x\"\n    mode = \"bootfile\"\n    writable = true\n  }\n}", "cannot be writable", 2},
 		{"unknown attribute", "host \"a\" {\n  macaddr = \"1\"\n}", "Unsupported argument", 2},
 		{"syntax", "host \"a\" {", "Unclosed configuration block", 1},
 	} {

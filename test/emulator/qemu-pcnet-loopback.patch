@@ -1,0 +1,15 @@
+--- a/hw/net/pcnet.c
++++ b/hw/net/pcnet.c
+@@ -1712,6 +1712,12 @@
+     s->nic = qemu_new_nic(info, &s->conf, object_get_typename(OBJECT(dev)),
+                           dev->id, &dev->mem_reentrancy_guard, s);
+     qemu_format_nic_info_str(qemu_get_queue(s->nic), s->conf.macaddr.a);
++    /*
++     * Loopback frames must keep their length: firmware such as the Sun
++     * OpenBoot PROM checks it in its internal loopback test. The receive
++     * path copes with short frames.
++     */
++    qemu_get_queue(s->nic)->do_not_pad = true;
+ 
+     /* Initialize the PROM */
+ 

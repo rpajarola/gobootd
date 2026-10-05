@@ -139,6 +139,8 @@ go test ./...
 
 The tests need no privileges: protocols run on an in-memory segment, and an
 end-to-end test boots a client through the daemon over UDP.
+[`test/emulator`](test/emulator) boots emulated machines with their real
+boot PROMs (not included) against bootd, e.g. a SPARCstation 5 in QEMU.
 
 ## License
 

@@ -5,8 +5,9 @@
 // Clients usually find the server by broadcasting WHOAMI through the
 // portmapper's CALLIT, then ask GETFILE for "root", "swap" and so on. The
 // answers come from the host's export blocks, the same ones the NFS server
-// serves, so the two cannot disagree. Unknown clients and unknown keys get
-// no answer, so another server can answer instead.
+// serves, so the two cannot disagree. NetBSD also asks for "gateway",
+// answered with the router and netmask. Unknown clients and unknown keys
+// get no answer, so another server can answer instead.
 package bootparam
 
 import (
@@ -138,10 +139,7 @@ func (s *Server) whoami(env *daemon.Env, n *netif.Network, c *oncrpc.Call) ([]by
 		log.Info(fmt.Sprintf("bootparam whoami from %s denied (%v)", h.Name, err))
 		return nil, oncrpc.ErrDrop
 	}
-	router := s.router
-	if !router.IsValid() {
-		router = n.Addr().Addr()
-	}
+	router := s.routerFor(n)
 	e := &oncrpc.Encoder{}
 	e.String(h.Name).String(s.opts.Domain)
 	encodeAddr(e, router)
@@ -167,6 +165,17 @@ func (s *Server) getfile(env *daemon.Env, n *netif.Network, c *oncrpc.Call) ([]b
 	}
 	e := &oncrpc.Encoder{}
 	x, err := h.Export(key)
+	if err != nil && key == "gateway" {
+		// NetBSD learns its gateway and netmask this way: the server
+		// part is the gateway, the path its netmask.
+		router := s.routerFor(n)
+		mask := net.IP(net.CIDRMask(n.Addr().Bits(), 32)).String()
+		e.String(router.String())
+		encodeAddr(e, router)
+		e.String(mask)
+		log.Info(fmt.Sprintf("bootparam getfile gateway from %s: %s, netmask %s", h.Name, router, mask))
+		return e.Bytes(), nil
+	}
 	if err != nil {
 		if key == "dump" {
 			// SunOS asks for a dump device; an empty answer means none.
@@ -192,6 +201,14 @@ func (s *Server) getfile(env *daemon.Env, n *netif.Network, c *oncrpc.Call) ([]b
 	e.String(x.ExportPath)
 	log.Info(fmt.Sprintf("bootparam getfile %s from %s: %s:%s", key, h.Name, server, x.ExportPath), "server_address", addr.String())
 	return e.Bytes(), nil
+}
+
+// routerFor returns the router announced on n.
+func (s *Server) routerFor(n *netif.Network) netip.Addr {
+	if s.router.IsValid() {
+		return s.router
+	}
+	return n.Addr().Addr()
 }
 
 // lookup finds the address of another NFS server: a configured host, or

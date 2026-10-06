@@ -105,7 +105,7 @@ host "kali" {
 
   export "root" {
     path   = "/export/hosts/kali/root"
-    server = "aiax"
+    server = "aiax"   # served by another NFS server
   }
   export "swap" {
     path     = "/export/hosts/kali/swap"
@@ -127,7 +127,13 @@ host "sun2" {
     boot2 = "files/sun2/netboot"
     mode  = "bootfile"
   }
-  export "root" { path = "/export/hosts/sun2/root" }
+  export "root" {
+    path = "/export/hosts/sun2/root"
+    # Owners, modes and device nodes of a root extracted without root
+    # privileges, e.g. from: tar -cf root.mtree --format=mtree @root.tgz
+    # spec        = "/export/hosts/sun2/root.mtree"
+    # export_path = "/sun2/root"   # the path clients see; default: path
+  }
 }
 
 # NCD X terminal: TFTP only.

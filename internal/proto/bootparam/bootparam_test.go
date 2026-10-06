@@ -113,6 +113,7 @@ func TestGetfile(t *testing.T) {
 		{"root", "aiax", "192.168.1.1", filepath.Join(dir, "root")},
 		{"swap", "nfshost", "192.168.1.9", "/export/swap/kali"},
 		{"dump", "", "0.0.0.0", ""},
+		{"gateway", "192.168.1.1", "192.168.1.1", "255.255.255.0"},
 	} {
 		server, addr, path, err := getfile("kali", tc.key)
 		if err != nil || server != tc.server || addr.String() != tc.addr || path != tc.path {

@@ -1,3 +1,4 @@
 /bootd
 /test/emulator/bin/
 /test/emulator/roms/
+/test/emulator/netbsd/

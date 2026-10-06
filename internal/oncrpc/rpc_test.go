@@ -121,8 +121,11 @@ func TestPortmapper(t *testing.T) {
 	if p := getport(echoProg, 2, protoUDP); p != PortmapPort {
 		t.Errorf("GETPORT echo = %d", p)
 	}
-	if p := getport(echoProg, 1, protoUDP); p != 0 {
-		t.Errorf("GETPORT for a missing version = %d", p)
+	if p := getport(echoProg, 1, protoUDP); p != PortmapPort {
+		t.Errorf("GETPORT for another version = %d, want the program's port", p)
+	}
+	if p := getport(399999, 1, protoUDP); p != 0 {
+		t.Errorf("GETPORT for an unknown program = %d", p)
 	}
 	if p := getport(echoProg, 2, 6); p != 0 {
 		t.Errorf("GETPORT over TCP = %d", p)

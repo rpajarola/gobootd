@@ -300,14 +300,18 @@ func (d *Dispatcher) portmapper() *Program {
 }
 
 func (d *Dispatcher) getport(c *Call) ([]byte, error) {
-	prog, vers, prot := c.Args.Uint32(), c.Args.Uint32(), c.Args.Uint32()
+	prog, _, prot := c.Args.Uint32(), c.Args.Uint32(), c.Args.Uint32() // any version, see below
 	c.Args.Uint32() // port
 	if c.Args.Err() != nil {
 		return nil, ErrGarbageArgs
 	}
+	// Like Sun's portmapper, answer for a version that is not registered
+	// with the program's port: the call then gets a version mismatch
+	// with the supported range. NetBSD relies on this to fall back from
+	// MOUNT v3 to v1; given port 0 it fails instead.
 	var port uint16
 	d.mu.Lock()
-	if d.progs[prog][vers] != nil && prot == protoUDP {
+	if len(d.progs[prog]) > 0 && prot == protoUDP {
 		port = Port(prog)
 	}
 	d.mu.Unlock()

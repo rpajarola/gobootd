@@ -22,7 +22,7 @@ clients, but not yet against real hardware.
 | ND | Sun-2 | works (boot only; no writes yet) |
 | TFTP | most | works (read only; blksize, tsize, timeout options) |
 | bootparam | SunOS, NetBSD, Solaris | works (with a built-in portmapper) |
-| NFSv2 | diskless root/swap | planned |
+| NFSv2 | diskless root/swap | works (read only, MOUNT v1) |
 | RPL | IBM, 3Com DOS boot ROMs | planned |
 | MOP | DEC VAX, Alpha | planned |
 | BOOTP/DHCP | most | planned |
@@ -126,7 +126,16 @@ an IP address of bootd's own).
   NFS always agree. Exports with a `server` point to another NFS server.
   The portmapper is built in and answers broadcast `CALLIT` requests;
   unknown clients and unknown keys get no answer, so another server can
-  answer. `dump` gets an empty answer when not configured, as SunOS expects.
+  answer. `dump` gets an empty answer when not configured, as SunOS expects;
+  `gateway` gets the router and netmask, which NetBSD needs.
+- **NFS** serves the host's `export` blocks over NFSv2 and MOUNT v1 (UDP);
+  a client may only mount its own exports. A root file system extracted
+  without root privileges lacks device nodes and root-owned files: give
+  the export a `spec`, an mtree(5) file such as
+  `tar -cf root.mtree --format=mtree @root.tgz` makes, and bootd serves the
+  owners, modes, devices and symlinks it lists. `export_path` sets the path
+  clients see; NetBSD keeps `server:path` in 90 bytes. Writes are not
+  supported yet.
 - **TFTP** identifies clients by IP address. A request for a path such as
   `/tftpboot/name` also matches a file named `name`. Requests sent to a
   broadcast address are answered too, but refusals of broadcast requests are
@@ -146,7 +155,8 @@ go test ./...
 The tests need no privileges: protocols run on an in-memory segment, and an
 end-to-end test boots a client through the daemon over UDP.
 [`test/emulator`](test/emulator) boots emulated machines with their real
-boot PROMs (not included) against bootd, e.g. a SPARCstation 5 in QEMU.
+boot PROMs (not included) against bootd, e.g. a SPARCstation 5 in QEMU
+that boots NetBSD diskless: RARP, TFTP, bootparam and NFS.
 
 ## License
 

@@ -88,7 +88,11 @@ func printHost(w io.Writer, h *inventory.Host) {
 		if e.Server != "" {
 			server = " on " + e.Server
 		}
-		fmt.Fprintf(tw, "  export\t%s%s%s\t%s%s\n", e.Name, server, rw(e.Writable), e.Path, missing(e.Path))
+		as := ""
+		if e.ExportPath != e.Path {
+			as = " as " + e.ExportPath
+		}
+		fmt.Fprintf(tw, "  export\t%s%s%s\t%s%s%s\n", e.Name, server, rw(e.Writable), e.Path, missing(e.Path), as)
 	}
 	for _, s := range h.Shares {
 		fmt.Fprintf(tw, "  share\t%s%s\t%s%s\n", s.Name, rw(s.Writable), s.Path, missing(s.Path))

@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/gohcl"
@@ -180,8 +181,18 @@ type Export struct {
 	// server.
 	Server   string `hcl:"server,optional"`
 	Writable bool   `hcl:"writable,optional"`
+	// Spec is an mtree(5) specification of the export's files. Its
+	// owners, modes, device nodes and symlinks are served as given, so
+	// a root file system can be served without root privileges.
+	Spec string `hcl:"spec,optional"`
+	// ExportPath is the path clients mount and bootparam announces.
+	// Defaults to the absolute path. Old clients limit its length:
+	// NetBSD keeps "server:path" in 90 bytes.
+	ExportPath string `hcl:"export_path,optional"`
 
-	DefRange hcl.Range `hcl:",def_range"`
+	DefRange        hcl.Range `hcl:",def_range"`
+	SpecRange       hcl.Range `hcl:"spec,attr_range"`
+	ExportPathRange hcl.Range `hcl:"export_path,attr_range"`
 }
 
 // Share is a directory served over SMB.
@@ -344,6 +355,12 @@ func (c *Config) validate() hcl.Diagnostics {
 			Detail:  "Services are enabled, but there is no network block to offer them on.",
 			Subject: c.Services[0].DefRange.Ptr()})
 	}
+	for _, x := range c.allExports() {
+		if x.ExportPath != "" && !strings.HasPrefix(x.ExportPath, "/") {
+			diags = append(diags, errorf(x.ExportPathRange, "Invalid export path",
+				"export_path %q must be absolute.", x.ExportPath))
+		}
+	}
 	for _, cl := range c.Classes {
 		diags = append(diags, checkServices(cl.Services, cl.ServicesRange, true)...)
 		diags = append(diags, checkFiles(cl.Files)...)
@@ -397,6 +414,17 @@ func (n *Network) validate() hcl.Diagnostics {
 		}
 	}
 	return diags
+}
+
+func (c *Config) allExports() []*Export {
+	var xs []*Export
+	for _, cl := range c.Classes {
+		xs = append(xs, cl.Exports...)
+	}
+	for _, h := range c.Hosts {
+		xs = append(xs, h.Exports...)
+	}
+	return xs
 }
 
 func checkServices(names []string, rng hcl.Range, allowAll bool) hcl.Diagnostics {

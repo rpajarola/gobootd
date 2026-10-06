@@ -304,8 +304,19 @@ func (b *builder) disks(cs []*config.Disk) []*Disk {
 func (b *builder) exports(cs []*config.Export) []*Export {
 	var out []*Export
 	for _, c := range cs {
-		e := &Export{Name: c.Name, Path: b.path(c.Path), Server: c.Server, Writable: c.Writable, Origin: c.DefRange}
+		e := &Export{Name: c.Name, Path: b.path(c.Path), ExportPath: c.ExportPath, Server: c.Server, Writable: c.Writable, Origin: c.DefRange}
+		if e.ExportPath == "" {
+			e.ExportPath = e.Path
+		}
+		e.ExportPath = filepath.Clean(e.ExportPath)
+		if len(e.ExportPath) > 86 {
+			b.warn(&c.DefRange, "Long export path", "Export path %s is %d characters long; NetBSD clients keep \"server:path\" in 90 bytes. Set a shorter export_path.", e.ExportPath, len(e.ExportPath))
+		}
 		b.exists(e.Path, &c.DefRange)
+		if c.Spec != "" {
+			e.Spec = b.path(c.Spec)
+			b.exists(e.Spec, &c.SpecRange)
+		}
 		out = append(out, e)
 	}
 	return out

@@ -96,11 +96,16 @@ type Disk struct {
 
 // Export is a file system path served over NFS.
 type Export struct {
-	Name     string
-	Path     string
-	Server   string
-	Writable bool
-	Origin   hcl.Range
+	Name string
+	// Path is the path on this server.
+	Path string
+	// ExportPath is the path clients mount and bootparam announces.
+	ExportPath string
+	Server     string
+	Writable   bool
+	// Spec is the path of an mtree specification of the files, or "".
+	Spec   string
+	Origin hcl.Range
 }
 
 // Share is a directory served over SMB.

@@ -189,8 +189,8 @@ func (s *Server) getfile(env *daemon.Env, n *netif.Network, c *oncrpc.Call) ([]b
 	}
 	e.String(server)
 	encodeAddr(e, addr)
-	e.String(x.Path)
-	log.Info(fmt.Sprintf("bootparam getfile %s from %s: %s:%s", key, h.Name, server, x.Path), "server_address", addr.String())
+	e.String(x.ExportPath)
+	log.Info(fmt.Sprintf("bootparam getfile %s from %s: %s:%s", key, h.Name, server, x.ExportPath), "server_address", addr.String())
 	return e.Bytes(), nil
 }
 

@@ -12,6 +12,7 @@ import (
 	"github.com/rpajarola/gobootd/internal/inventory"
 	"github.com/rpajarola/gobootd/internal/ipstack"
 	"github.com/rpajarola/gobootd/internal/link"
+	"github.com/rpajarola/gobootd/internal/oncrpc"
 )
 
 // Network is one configured network.
@@ -21,6 +22,9 @@ type Network struct {
 	// IP is bootd's IP stack on the network. It receives the frames no
 	// protocol subscribed to.
 	IP *ipstack.Stack
+	// RPC serves the ONC RPC programs (portmapper, bootparam, NFS) on
+	// the network.
+	RPC *oncrpc.Dispatcher
 }
 
 // Open opens the transport described by cfg and returns the network. Call
@@ -86,19 +90,22 @@ func New(cfg *config.Network, t link.Port, mac net.HardwareAddr) (*Network, erro
 		t.Close()
 		return nil, err
 	}
-	return &Network{Network: ln, Config: cfg, IP: ip}, nil
+	return &Network{Network: ln, Config: cfg, IP: ip, RPC: oncrpc.NewDispatcher(ip)}, nil
 }
 
 // Run serves the network until ctx is done.
 func (n *Network) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	errc := make(chan error, 1)
+	errc := make(chan error, 2)
 	go func() { errc <- n.IP.Run(ctx) }()
+	go func() { errc <- n.RPC.Run(ctx) }()
 	err := n.Network.Run(ctx)
 	cancel()
-	if ipErr := <-errc; err == nil {
-		err = ipErr
+	for range 2 {
+		if e := <-errc; err == nil {
+			err = e
+		}
 	}
 	return err
 }

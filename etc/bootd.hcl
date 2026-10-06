@@ -62,7 +62,11 @@ service "tftp" {
   # retries     = 5
   # max_blksize = 1468     # largest blksize option accepted
 }
-service "bootparam" {}
+service "bootparam" {
+  # server_name = "aiax"         # announced as the NFS server; default: host name
+  # domain      = ""             # NIS domain
+  # router      = "192.168.1.1"  # default: bootd's address on the network
+}
 service "nfs" {}
 
 # HP 9000/300 and /400: RMP picks the class by the machine type the boot

@@ -21,7 +21,7 @@ clients, but not yet against real hardware.
 | RMP | HP 9000/300 and /400 | works |
 | ND | Sun-2 | works (boot only; no writes yet) |
 | TFTP | most | works (read only; blksize, tsize, timeout options) |
-| bootparam | SunOS, NetBSD, Solaris | planned |
+| bootparam | SunOS, NetBSD, Solaris | works (with a built-in portmapper) |
 | NFSv2 | diskless root/swap | planned |
 | RPL | IBM, 3Com DOS boot ROMs | planned |
 | MOP | DEC VAX, Alpha | planned |
@@ -121,6 +121,12 @@ an IP address of bootd's own).
   first-stage program (at most 15 blocks, e.g. `bootyy`), and `boot2`
   (e.g. `netboot`) starts at block 16. Disks in `image` mode are matched by
   ND minor number in `unit` (64 + n for `ndp<n>`).
+- **bootparam** tells a client its host name and where its exports are:
+  `GETFILE root` answers with the host's `export "root"`, so bootparam and
+  NFS always agree. Exports with a `server` point to another NFS server.
+  The portmapper is built in and answers broadcast `CALLIT` requests;
+  unknown clients and unknown keys get no answer, so another server can
+  answer. `dump` gets an empty answer when not configured, as SunOS expects.
 - **TFTP** identifies clients by IP address. A request for a path such as
   `/tftpboot/name` also matches a file named `name`. Requests sent to a
   broadcast address are answered too, but refusals of broadcast requests are

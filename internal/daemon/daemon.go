@@ -161,6 +161,7 @@ func Run(ctx context.Context, path string, reload <-chan struct{}, stderr io.Wri
 		}
 		nets[c.Name] = n
 		n.SetHosts(l.Inventory)
+		n.RPC.SetLogger(log.With("network", c.Name))
 		log.Info("network up", "network", c.Name, "address", n.Addr().String(), "mac", n.Interface().MAC.String(), "transport", n.Transport().Interface().Name)
 		wg.Go(func() {
 			if err := n.Run(ctx); err != nil && ctx.Err() == nil {

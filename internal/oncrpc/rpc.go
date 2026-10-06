@@ -301,7 +301,7 @@ func (d *Dispatcher) portmapper() *Program {
 
 func (d *Dispatcher) getport(c *Call) ([]byte, error) {
 	prog, _, prot := c.Args.Uint32(), c.Args.Uint32(), c.Args.Uint32() // any version, see below
-	c.Args.Uint32() // port
+	c.Args.Uint32()                                                    // port
 	if c.Args.Err() != nil {
 		return nil, ErrGarbageArgs
 	}

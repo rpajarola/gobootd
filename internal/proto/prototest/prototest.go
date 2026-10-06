@@ -122,10 +122,10 @@ func (l *Log) Contains(s string) bool {
 	return false
 }
 
-// Start runs svc with the named service block until the test ends.
-func (e *Env) Start(t testing.TB, svc daemon.Service, name string) *Log {
+// ServiceEnv returns the environment for svc with the named service block,
+// with svc's options decoded, without running it. Its log goes to log.
+func (e *Env) ServiceEnv(t testing.TB, svc daemon.Service, name string, log *Log) *daemon.Env {
 	t.Helper()
-	log := &Log{}
 	var cfg *config.Service
 	for _, s := range e.Config.Services {
 		if s.Name == name {
@@ -148,6 +148,14 @@ func (e *Env) Start(t testing.TB, svc daemon.Service, name string) *Log {
 			env.Networks = append(env.Networks, e.Networks[c.Name])
 		}
 	}
+	return env
+}
+
+// Start runs svc with the named service block until the test ends.
+func (e *Env) Start(t testing.TB, svc daemon.Service, name string) *Log {
+	t.Helper()
+	log := &Log{}
+	env := e.ServiceEnv(t, svc, name, log)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- svc.Run(ctx, env) }()

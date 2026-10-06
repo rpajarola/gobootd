@@ -56,7 +56,11 @@ type Server struct {
 }
 
 type session struct {
-	id   uint16
+	id uint16
+	// seq and name identify the boot request that opened the session,
+	// so a repeated request gets the same session.
+	seq  uint32
+	name string
 	host *inventory.Host
 	file *inventory.File
 	f    *os.File
@@ -69,14 +73,7 @@ func (s *Server) Options() any { return &s.opts }
 
 // Run implements daemon.Service.
 func (s *Server) Run(ctx context.Context, env *daemon.Env) error {
-	if s.opts.ServerName == "" {
-		h, _ := os.Hostname()
-		s.opts.ServerName, _, _ = strings.Cut(h, ".")
-	}
-	if len(s.opts.ServerName) > hostLen {
-		s.opts.ServerName = s.opts.ServerName[:hostLen]
-	}
-	s.sessions = map[string]*session{}
+	s.setup()
 	defer s.closeAll()
 
 	ports, err := env.Subscribe(Match)
@@ -99,6 +96,18 @@ func (s *Server) Run(ctx context.Context, env *daemon.Env) error {
 		}
 	}()
 	return link.Serve(ctx, ports, func(p link.Port, frame []byte) { s.handle(env, p, frame) })
+}
+
+// setup applies option defaults and initializes the session table.
+func (s *Server) setup() {
+	if s.opts.ServerName == "" {
+		h, _ := os.Hostname()
+		s.opts.ServerName, _, _ = strings.Cut(h, ".")
+	}
+	if len(s.opts.ServerName) > hostLen {
+		s.opts.ServerName = s.opts.ServerName[:hostLen]
+	}
+	s.sessions = map[string]*session{}
 }
 
 func (s *Server) handle(env *daemon.Env, port link.Port, frame []byte) {
@@ -182,6 +191,16 @@ func (s *Server) boot(env *daemon.Env, log *slog.Logger, f link.Frame, req Packe
 	}
 
 	repl.Filename = req.Filename
+	s.mu.Lock()
+	if old, ok := s.sessions[f.Src.String()]; ok && old.seq == req.Seq && old.name == req.Filename {
+		// The client did not get our reply and asked again.
+		old.seen = time.Now()
+		repl.Session = old.id
+		s.mu.Unlock()
+		log.Debug("repeated boot request", "session", old.id)
+		return repl
+	}
+	s.mu.Unlock()
 	// HP-UX secondary loaders ask for paths like /hp-ux.
 	file, how, err := h.FileIgnoringDir(service.RMP, req.Filename)
 	if err != nil {
@@ -213,7 +232,7 @@ func (s *Server) boot(env *daemon.Env, log *slog.Logger, f link.Frame, req Packe
 	if s.lastSID == 0 || s.lastSID == probeSID {
 		s.lastSID = 1
 	}
-	s.sessions[f.Src.String()] = &session{id: s.lastSID, host: h, file: file, f: fd, seen: time.Now()}
+	s.sessions[f.Src.String()] = &session{id: s.lastSID, seq: req.Seq, name: req.Filename, host: h, file: file, f: fd, seen: time.Now()}
 	repl.Session = s.lastSID
 	log.Info(fmt.Sprintf("rmp boot request from %s: sending %s", h.Name, file.Path),
 		"requested", req.Filename, "match", how.String(), "session", s.lastSID)

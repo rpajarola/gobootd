@@ -64,13 +64,7 @@ func (s *Server) Options() any { return &s.opts }
 
 // Run implements daemon.Service.
 func (s *Server) Run(ctx context.Context, env *daemon.Env) error {
-	if s.opts.Window <= 0 {
-		s.opts.Window = 6
-	}
-	if s.opts.SendDelay == nil {
-		d := 10
-		s.opts.SendDelay = &d
-	}
+	s.setup()
 	ports, err := env.Subscribe(Match)
 	if err != nil {
 		return err
@@ -79,6 +73,17 @@ func (s *Server) Run(ctx context.Context, env *daemon.Env) error {
 		env.Log.Info("listening", "network", p.Interface().Name)
 	}
 	return link.Serve(ctx, ports, func(p link.Port, frame []byte) { s.handle(ctx, env, p, frame) })
+}
+
+// setup applies option defaults.
+func (s *Server) setup() {
+	if s.opts.Window <= 0 {
+		s.opts.Window = 6
+	}
+	if s.opts.SendDelay == nil {
+		d := 10
+		s.opts.SendDelay = &d
+	}
 }
 
 func (s *Server) handle(ctx context.Context, env *daemon.Env, port link.Port, frame []byte) {

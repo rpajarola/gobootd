@@ -53,6 +53,11 @@ const (
 // Server serves files over TFTP.
 type Server struct {
 	opts Options
+	// retransmit overrides the timeout; for tests.
+	retransmit time.Duration
+
+	mu     sync.Mutex
+	active map[netip.AddrPort]bool // clients with a transfer running
 }
 
 // Options implements daemon.Configurable.
@@ -122,8 +127,38 @@ func (s *Server) serve(ctx context.Context, env *daemon.Env, n *netif.Network, l
 			s: s, env: env, log: log, req: req, ip: n.IP,
 			client: d.From, local: local, broadcast: d.To != local,
 		}
-		wg.Go(func() { t.run(ctx) })
+		// A client that resends its request because the first data
+		// packet was lost would otherwise get a second transfer.
+		if !s.start(d.From) {
+			log.Debug("ignoring repeated request", "file", req.filename)
+			continue
+		}
+		wg.Go(func() {
+			defer s.finish(d.From)
+			t.run(ctx)
+		})
 	}
+}
+
+// start records a transfer for client, and reports false if one is
+// already running.
+func (s *Server) start(client netip.AddrPort) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.active == nil {
+		s.active = map[netip.AddrPort]bool{}
+	}
+	if s.active[client] {
+		return false
+	}
+	s.active[client] = true
+	return true
+}
+
+func (s *Server) finish(client netip.AddrPort) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.active, client)
 }
 
 type transfer struct {
@@ -217,6 +252,9 @@ func (t *transfer) run(ctx context.Context) {
 	defer stop()
 
 	blksize, oack := t.negotiate(st.Size())
+	if t.s.retransmit > 0 {
+		t.timeout = t.s.retransmit
+	}
 	t.log.Info(fmt.Sprintf("tftp request from %s for %q: sending %s", h.Name, t.req.filename, file.Path),
 		"match", how.String(), "bytes", st.Size(), "blksize", blksize, "mode", t.req.mode, "broadcast", t.broadcast)
 

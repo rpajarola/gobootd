@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -219,8 +220,15 @@ host "other" {
 func clientPacket(p Packet) []byte {
 	b := p.Marshal()
 	b[6], b[7], b[8], b[9] = 0x06, 0x08, 0x06, 0x09
-	if p.Type == ReadReq {
+	switch p.Type {
+	case ReadReq:
 		b = append(b, byte(p.Size>>8), byte(p.Size))
+	case BootReq:
+		b = b[:hdrLen]
+		b = append(b, byte(p.Version>>8), byte(p.Version))
+		b = append(b, fmt.Sprintf("%-20s", p.MachType)...)
+		b = append(b, byte(len(p.Filename)))
+		b = append(b, p.Filename...)
 	}
 	return b
 }

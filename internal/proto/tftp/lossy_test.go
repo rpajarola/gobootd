@@ -61,11 +61,26 @@ func lossyGet(t *testing.T, l *ipstack.UDPListener, name string) ([]byte, error)
 			l.WriteTo(ack, peer)
 			want++
 			if len(d.Data)-4 < defaultBlockSize {
+				dally(l, peer, ack)
 				return data, nil
 			}
 		}
 	}
 	return nil, fmt.Errorf("gave up after %d bytes", len(data))
+}
+
+// dally answers retransmissions of the last block for a while, as RFC 1350
+// suggests, in case the last acknowledgement was lost.
+func dally(l *ipstack.UDPListener, peer netip.AddrPort, ack []byte) {
+	end := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(end) {
+		ctx, cancel := context.WithDeadline(context.Background(), end)
+		d, err := l.Read(ctx)
+		cancel()
+		if err == nil && d.From == peer && len(d.Data) >= 4 && binary.BigEndian.Uint16(d.Data) == opDATA {
+			l.WriteTo(ack, peer)
+		}
+	}
 }
 
 func TestLossy(t *testing.T) {

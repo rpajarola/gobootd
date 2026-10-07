@@ -129,8 +129,15 @@ func (u *UDP) destinations(frame []byte) []netip.AddrPort {
 		}
 	}
 	if dst := [6]byte(frame[0:6]); dst[0]&1 == 0 {
-		if p, ok := u.macs[dst]; ok && (slices.Contains(u.static, p) || !u.learned[p].IsZero()) {
-			return []netip.AddrPort{p}
+		if p, ok := u.macs[dst]; ok {
+			for _, s := range u.static {
+				if s == p || s.Addr() == p.Addr() {
+					return []netip.AddrPort{s}
+				}
+			}
+			if !u.learned[p].IsZero() {
+				return []netip.AddrPort{p}
+			}
 		}
 	}
 	out := slices.Clone(u.static)
@@ -149,7 +156,15 @@ func (u *UDP) Knows(mac net.HardwareAddr) bool {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	p, ok := u.macs[[6]byte(mac)]
-	return ok && (slices.Contains(u.static, p) || time.Since(u.learned[p]) <= peerTimeout)
+	if !ok {
+		return false
+	}
+	for _, s := range u.static {
+		if s == p || s.Addr() == p.Addr() {
+			return true
+		}
+	}
+	return time.Since(u.learned[p]) <= peerTimeout
 }
 
 // Close implements Port.

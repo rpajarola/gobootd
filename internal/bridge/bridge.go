@@ -53,9 +53,69 @@ type Bridge struct {
 	StatsInterval time.Duration
 
 	mu       sync.Mutex
+	lanMAC   [6]byte
 	lan      map[[6]byte]time.Time
+	udp      map[[6]byte]time.Time
 	lanStats ifStats
 	udpStats ifStats
+}
+
+// isLAN reports whether mac is currently known on the LAN.
+func (b *Bridge) isLAN(mac [6]byte) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.isLANLocked(mac)
+}
+
+func (b *Bridge) isLANLocked(mac [6]byte) bool {
+	if b.lanMAC != [6]byte{} && mac == b.lanMAC {
+		return true
+	}
+	t, ok := b.lan[mac]
+	if !ok || time.Since(t) >= lanTimeout {
+		return false
+	}
+	if ut, uok := b.udp[mac]; uok && ut.After(t) {
+		return false
+	}
+	return true
+}
+
+// isUDP reports whether mac is currently known on the UDP transport.
+func (b *Bridge) isUDP(mac [6]byte) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.isUDPLocked(mac)
+}
+
+func (b *Bridge) isUDPLocked(mac [6]byte) bool {
+	t, ok := b.udp[mac]
+	if ok && time.Since(t) < lanTimeout {
+		if lt, lok := b.lan[mac]; lok && lt.After(t) {
+			return false
+		}
+		return true
+	}
+	if b.UDP != nil && b.UDP.Knows(mac[:]) {
+		if lt, lok := b.lan[mac]; lok && time.Since(lt) < lanTimeout {
+			return false
+		}
+		return true
+	}
+	return false
+}
+
+func (b *Bridge) pruneLocked(now time.Time) {
+	for m, t := range b.lan {
+		if now.Sub(t) >= lanTimeout {
+			delete(b.lan, m)
+		}
+	}
+	for m, t := range b.udp {
+		if now.Sub(t) >= lanTimeout {
+			delete(b.udp, m)
+		}
+	}
 }
 
 // LANStats returns a snapshot of the LAN interface statistics.
@@ -90,6 +150,9 @@ func (b *Bridge) UDPStats() InterfaceStats {
 
 // LogStats logs the current statistics for each interface.
 func (b *Bridge) LogStats() {
+	b.mu.Lock()
+	b.pruneLocked(time.Now())
+	b.mu.Unlock()
 	b.logInterface(b.LANStats())
 	b.logInterface(b.UDPStats())
 }
@@ -155,8 +218,12 @@ func (b *Bridge) recordLANTx(bytes, pkts int, err error) {
 func (b *Bridge) Run(ctx context.Context) error {
 	b.mu.Lock()
 	b.lan = map[[6]byte]time.Time{}
+	b.udp = map[[6]byte]time.Time{}
 	b.lanStats = ifStats{hosts: make(map[[6]byte]netip.Addr)}
 	b.udpStats = ifStats{hosts: make(map[[6]byte]netip.Addr)}
+	if b.LAN != nil && b.LAN.Interface() != nil && len(b.LAN.Interface().MAC) == 6 {
+		copy(b.lanMAC[:], b.LAN.Interface().MAC)
+	}
 	b.mu.Unlock()
 
 	ctx, cancel := context.WithCancelCause(ctx)
@@ -289,43 +356,58 @@ func (b *Bridge) fromLAN(ctx context.Context) error {
 			b.mu.Unlock()
 			continue
 		}
-		dst, src := net.HardwareAddr(frame[0:6]), net.HardwareAddr(frame[6:12])
-		// Our own transmissions, captured again on platforms that cannot
-		// capture only incoming frames.
-		if b.UDP.Knows(src) {
+		var dstMAC, srcMAC [6]byte
+		copy(dstMAC[:], frame[0:6])
+		copy(srcMAC[:], frame[6:12])
+
+		// Drop invalid frames: multicast source, all-zero source, or loopback (src == dst).
+		if srcMAC[0]&1 != 0 || srcMAC == [6]byte{} || srcMAC == dstMAC {
+			b.mu.Lock()
+			b.lanStats.errors++
+			b.mu.Unlock()
 			continue
 		}
 
-		var newHost, newIP bool
-		var srcMAC [6]byte
-		copy(srcMAC[:], src)
-		isHost := srcMAC[0]&1 == 0 && srcMAC != [6]byte{}
+		// Suppress BPF loopback: if the source MAC is known on the UDP side,
+		// this frame was transmitted onto the LAN by this bridge (or looped
+		// back by the physical segment).
+		if b.isUDP(srcMAC) {
+			continue
+		}
+
 		ip := findSourceIP(frame)
 
+		var newHost, newIP bool
 		b.mu.Lock()
 		b.lanStats.rxPackets++
 		b.lanStats.rxBytes += uint64(len(frame))
-		if isHost {
-			if prevIP, ok := b.lanStats.hosts[srcMAC]; !ok {
-				b.lanStats.hosts[srcMAC] = ip
-				newHost = true
-			} else if !prevIP.IsValid() && ip.IsValid() {
-				b.lanStats.hosts[srcMAC] = ip
-				newIP = true
-			}
+		if prevIP, ok := b.lanStats.hosts[srcMAC]; !ok {
+			b.lanStats.hosts[srcMAC] = ip
+			newHost = true
+		} else if !prevIP.IsValid() && ip.IsValid() {
+			b.lanStats.hosts[srcMAC] = ip
+			newIP = true
 		}
-		b.lan[srcMAC] = time.Now()
-		local := dst[0]&1 == 0 && time.Since(b.lan[[6]byte(dst)]) < lanTimeout
+		now := time.Now()
+		b.lan[srcMAC] = now
+		delete(b.udp, srcMAC)
+
+		multicast := dstMAC[0]&1 != 0
+		dstOnLAN := b.isLANLocked(dstMAC)
 		b.mu.Unlock()
 
 		if newHost {
-			b.logNewHost(b.lanName(), src, ip, netip.Addr{})
+			b.logNewHost(b.lanName(), frame[6:12], ip, netip.Addr{})
 		} else if newIP {
-			b.logHostIP(b.lanName(), src, ip, netip.Addr{})
+			b.logHostIP(b.lanName(), frame[6:12], ip, netip.Addr{})
 		}
-		if local {
-			continue // between two machines on the LAN
+
+		// Standard Ethernet switch filtering:
+		// If destination is unicast and known on the same port (LAN), filter (drop).
+		if !multicast && dstOnLAN {
+			continue
 		}
+
 		if err := b.UDP.WriteFrame(frame); err != nil {
 			b.recordUDPTx(len(frame), 1, err)
 			b.logger().Debug("sending to peers failed", "err", err)
@@ -353,41 +435,61 @@ func (b *Bridge) fromUDP(ctx context.Context) error {
 			b.mu.Unlock()
 			continue
 		}
+		var dstMAC, srcMAC [6]byte
+		copy(dstMAC[:], frame[0:6])
+		copy(srcMAC[:], frame[6:12])
+
+		// Drop invalid frames: multicast source, all-zero source, or loopback (src == dst).
+		if srcMAC[0]&1 != 0 || srcMAC == [6]byte{} || srcMAC == dstMAC {
+			b.mu.Lock()
+			b.udpStats.errors++
+			b.mu.Unlock()
+			continue
+		}
+
 		peerIP := from.Addr()
 		if !peers[peerIP] {
 			peers[peerIP] = true
 			b.logger().Info("new peer", "peer", peerIP.String(), "mac", net.HardwareAddr(frame[6:12]).String())
 		}
-		dst, src := net.HardwareAddr(frame[0:6]), net.HardwareAddr(frame[6:12])
-		var newHost, newIP bool
-		var srcMAC [6]byte
-		copy(srcMAC[:], src)
-		isHost := srcMAC[0]&1 == 0 && srcMAC != [6]byte{}
+
 		ip := findSourceIP(frame)
 
+		var newHost, newIP bool
 		b.mu.Lock()
 		b.udpStats.rxPackets++
 		b.udpStats.rxBytes += uint64(len(frame))
-		if isHost {
-			if prevIP, ok := b.udpStats.hosts[srcMAC]; !ok {
-				b.udpStats.hosts[srcMAC] = ip
-				newHost = true
-			} else if !prevIP.IsValid() && ip.IsValid() {
-				b.udpStats.hosts[srcMAC] = ip
-				newIP = true
-			}
+		if prevIP, ok := b.udpStats.hosts[srcMAC]; !ok {
+			b.udpStats.hosts[srcMAC] = ip
+			newHost = true
+		} else if !prevIP.IsValid() && ip.IsValid() {
+			b.udpStats.hosts[srcMAC] = ip
+			newIP = true
 		}
+		now := time.Now()
+		b.udp[srcMAC] = now
+		delete(b.lan, srcMAC)
+
+		multicast := dstMAC[0]&1 != 0
+		dstOnLAN := b.isLANLocked(dstMAC)
+		dstOnUDP := b.isUDPLocked(dstMAC)
 		b.mu.Unlock()
 
 		if newHost {
-			b.logNewHost(b.udpName(), src, ip, peerIP)
+			b.logNewHost(b.udpName(), frame[6:12], ip, peerIP)
 		} else if newIP {
-			b.logHostIP(b.udpName(), src, ip, peerIP)
+			b.logHostIP(b.udpName(), frame[6:12], ip, peerIP)
 		}
 
-		multicast := dst[0]&1 != 0
-		if multicast || b.UDP.Knows(dst) {
-			// Relay between peers.
+		// Standard Ethernet switch filtering:
+		// - Multicast/broadcast: flood to both other UDP peers and LAN.
+		// - Unicast known on LAN: forward ONLY to LAN.
+		// - Unicast known on UDP: relay ONLY to other UDP peers.
+		// - Unicast unknown: flood to BOTH.
+		relayPeers := multicast || !dstOnLAN
+		sendLAN := multicast || !dstOnUDP
+
+		if relayPeers {
 			if n, err := b.UDP.WriteFrameExcept(frame, from); err != nil {
 				b.recordUDPTx(len(frame)*n, n, err)
 				b.logger().Debug("relaying to peers failed", "err", err)
@@ -395,7 +497,7 @@ func (b *Bridge) fromUDP(ctx context.Context) error {
 				b.recordUDPTx(len(frame)*n, n, nil)
 			}
 		}
-		if multicast || !b.UDP.Knows(dst) {
+		if sendLAN {
 			if err := b.LAN.WriteFrame(frame); err != nil {
 				b.recordLANTx(len(frame), 1, err)
 				b.logger().Warn("sending on the LAN failed", "err", err)

@@ -375,4 +375,143 @@ func TestBridgeHostIPAndPeerPortVariation(t *testing.T) {
 	}
 }
 
+func TestBridgeSwitchFiltering(t *testing.T) {
+	seg := linktest.NewSegment()
+	lanPort := seg.Station("02:00:00:00:00:fe") // Bridge's LAN interface MAC
+	hostA := seg.Station("08:00:20:00:00:10")
+	hostB := seg.Station("08:00:20:00:00:20")
+	udp := listen(t)
+
+	b := &Bridge{
+		LAN:           lanPort,
+		UDP:           udp,
+		Log:           slog.New(slog.DiscardHandler),
+		StatsInterval: -1,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go b.Run(ctx)
+
+	peer1 := listen(t, udp.Addr())
+	peer2 := listen(t, udp.Addr())
+	mPeer1 := mac("02:00:00:00:00:11")
+	mPeer2 := mac("02:00:00:00:00:22")
+	mHostA := mac("08:00:20:00:00:10")
+	mHostB := mac("08:00:20:00:00:20")
+	mBridgeLAN := mac("02:00:00:00:00:fe")
+	mUnknown := mac("08:00:20:ff:ff:ff")
+
+	// 1. Peer 1 and Peer 2 announce themselves to UDP
+	peer1.WriteFrame(link.Build(link.Broadcast, mPeer1, 0x9000, []byte("peer1-ann")))
+	read(hostA)
+	read(hostB)
+	peer2.WriteFrame(link.Build(link.Broadcast, mPeer2, 0x9000, []byte("peer2-ann")))
+	read(hostA)
+	read(hostB)
+	read(peer1)
+
+	// 2. Host A and Host B announce themselves to LAN
+	hostA.WriteFrame(link.Build(link.Broadcast, mHostA, 0x9000, []byte("hostA-ann")))
+	read(peer1)
+	read(peer2)
+	read(hostB)
+	hostB.WriteFrame(link.Build(link.Broadcast, mHostB, 0x9000, []byte("hostB-ann")))
+	read(peer1)
+	read(peer2)
+	read(hostA)
+
+	// Verify both sides are learned
+	var mPeer1Arr, mHostAArr [6]byte
+	copy(mPeer1Arr[:], mPeer1)
+	copy(mHostAArr[:], mHostA)
+	if !b.isUDP(mPeer1Arr) {
+		t.Error("expected peer1 to be known on UDP")
+	}
+	if !b.isLAN(mHostAArr) {
+		t.Error("expected hostA to be known on LAN")
+	}
+
+	// 3. Test: Unicast LAN-to-LAN traffic should be filtered from UDP
+	hostA.WriteFrame(link.Build(mHostB, mHostA, link.TypeIPv4, []byte("lan-to-lan")))
+	read(hostB) // hostB sees it on physical segment
+	if p1 := read(peer1); p1 != nil {
+		t.Errorf("expected peer1 NOT to receive LAN-to-LAN unicast, got: %s", p1)
+	}
+	if p2 := read(peer2); p2 != nil {
+		t.Errorf("expected peer2 NOT to receive LAN-to-LAN unicast, got: %s", p2)
+	}
+
+	// 4. Test: Unicast UDP-to-UDP traffic should be filtered from LAN
+	peer1.WriteFrame(link.Build(mPeer2, mPeer1, link.TypeIPv4, []byte("udp-to-udp")))
+	if read(peer2) == nil {
+		t.Error("expected peer2 to receive unicast from peer1")
+	}
+	if hA := read(hostA); hA != nil {
+		t.Errorf("expected hostA NOT to receive UDP-to-UDP unicast, got: %s", hA)
+	}
+	if hB := read(hostB); hB != nil {
+		t.Errorf("expected hostB NOT to receive UDP-to-UDP unicast, got: %s", hB)
+	}
+
+	// 5. Test: Unicast LAN to UDP peer (hostA -> peer1)
+	hostA.WriteFrame(link.Build(mPeer1, mHostA, link.TypeIPv4, []byte("hostA-to-peer1")))
+	if read(peer1) == nil {
+		t.Error("expected peer1 to receive unicast from hostA")
+	}
+	if read(peer2) != nil {
+		t.Error("expected peer2 NOT to receive unicast destined for peer1")
+	}
+
+	// 6. Test: Unicast UDP peer to LAN (peer1 -> hostA)
+	peer1.WriteFrame(link.Build(mHostA, mPeer1, link.TypeIPv4, []byte("peer1-to-hostA")))
+	if read(hostA) == nil {
+		t.Error("expected hostA to receive unicast from peer1")
+	}
+	if read(peer2) != nil {
+		t.Error("expected peer2 NOT to receive unicast destined for LAN hostA")
+	}
+
+	// 7. Test: Frame destined to bridge LAN interface MAC should be filtered from UDP
+	hostA.WriteFrame(link.Build(mBridgeLAN, mHostA, link.TypeIPv4, []byte("to-bridge-mac")))
+	if read(peer1) != nil || read(peer2) != nil {
+		t.Error("expected traffic destined to bridge LAN interface MAC to be filtered from UDP")
+	}
+
+	// 8. Test: Unknown unicast from LAN should flood to UDP
+	hostA.WriteFrame(link.Build(mUnknown, mHostA, link.TypeIPv4, []byte("lan-unknown")))
+	read(hostB)
+	if read(peer1) == nil && read(peer2) == nil {
+		t.Error("expected unknown unicast from LAN to flood to UDP")
+	}
+
+	// 9. Test: Unknown unicast from UDP should flood to LAN and other UDP peers
+	peer1.WriteFrame(link.Build(mUnknown, mPeer1, link.TypeIPv4, []byte("udp-unknown")))
+	if read(hostA) == nil {
+		t.Error("expected unknown unicast from UDP to flood to LAN")
+	}
+	read(hostB)
+	if read(peer2) == nil {
+		t.Error("expected unknown unicast from UDP to flood to other UDP peer")
+	}
+
+	// 10. Test: Invalid frames (multicast source, all-zero source, src==dst)
+	badSrc1 := mac("01:00:5e:00:00:01") // multicast source
+	peer1.WriteFrame(link.Build(mHostA, badSrc1, link.TypeIPv4, []byte("bad1")))
+	if read(hostA) != nil {
+		t.Error("expected frame with multicast source MAC to be dropped")
+	}
+
+	badSrc2 := mac("00:00:00:00:00:00") // all-zero source
+	peer1.WriteFrame(link.Build(mHostA, badSrc2, link.TypeIPv4, []byte("bad2")))
+	if read(hostA) != nil {
+		t.Error("expected frame with all-zero source MAC to be dropped")
+	}
+
+	// src == dst loopback
+	peer1.WriteFrame(link.Build(mPeer1, mPeer1, link.TypeIPv4, []byte("loopback")))
+	if read(hostA) != nil {
+		t.Error("expected frame with src == dst to be dropped")
+	}
+}
+
 

@@ -14,6 +14,7 @@ sudo bootbridge -i en0 -listen 127.0.0.1:4711 -peer 127.0.0.1:4712
 | `-i` | (required) | network interface to bridge |
 | `-listen` | `127.0.0.1:4711` | UDP address to exchange frames on |
 | `-peer` | none | UDP peer that always receives frames (repeatable) |
+| `-stats` | `30s` | interval to log interface statistics (0 to disable) |
 | `-v` | off | log every forwarding error |
 
 bootd then uses a network block such as:

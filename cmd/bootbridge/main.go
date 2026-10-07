@@ -10,12 +10,14 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/netip"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/rpajarola/gobootd/internal/bridge"
 	"github.com/rpajarola/gobootd/internal/link"
@@ -41,32 +43,42 @@ func (p *peerList) Set(v string) error {
 }
 
 func main() {
-	iface := flag.String("i", "", "network interface to bridge (required)")
-	listen := flag.String("listen", "127.0.0.1:4711", "UDP address to exchange frames on")
-	verbose := flag.Bool("v", false, "log every forwarding error")
+	os.Exit(mainCmd(os.Args[1:], os.Stderr))
+}
+
+func mainCmd(args []string, stderr io.Writer) int {
+	fs := flag.NewFlagSet("bootbridge", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	iface := fs.String("i", "", "network interface to bridge (required)")
+	listen := fs.String("listen", "127.0.0.1:4711", "UDP address to exchange frames on")
+	stats := fs.Duration("stats", 30*time.Second, "interval to log interface statistics (0 to disable)")
+	verbose := fs.Bool("v", false, "log every forwarding error")
 	var peers peerList
-	flag.Var(&peers, "peer", "UDP peer that always receives frames (repeatable)")
-	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: bootbridge -i interface [-listen addr:port] [-peer addr:port]... [-v]\n")
-		flag.PrintDefaults()
+	fs.Var(&peers, "peer", "UDP peer that always receives frames (repeatable)")
+	fs.Usage = func() {
+		fmt.Fprintf(stderr, "usage: bootbridge -i interface [-listen addr:port] [-peer addr:port]... [-stats duration] [-v]\n")
+		fs.PrintDefaults()
 	}
-	flag.Parse()
-	if *iface == "" || flag.NArg() != 0 {
-		flag.Usage()
-		os.Exit(2)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *iface == "" || fs.NArg() != 0 {
+		fs.Usage()
+		return 2
 	}
 	lvl := slog.LevelInfo
 	if *verbose {
 		lvl = slog.LevelDebug
 	}
-	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: lvl}))
-	if err := run(*iface, *listen, peers, log); err != nil {
-		fmt.Fprintf(os.Stderr, "bootbridge: %v\n", err)
-		os.Exit(1)
+	log := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: lvl}))
+	if err := run(*iface, *listen, peers, *stats, log); err != nil {
+		fmt.Fprintf(stderr, "bootbridge: %v\n", err)
+		return 1
 	}
+	return 0
 }
 
-func run(iface, listen string, peers []netip.AddrPort, log *slog.Logger) error {
+func run(iface, listen string, peers []netip.AddrPort, statsInterval time.Duration, log *slog.Logger) error {
 	addr, err := netip.ParseAddrPort(listen)
 	if err != nil {
 		return fmt.Errorf("-listen: %w", err)
@@ -88,5 +100,8 @@ func run(iface, listen string, peers []netip.AddrPort, log *slog.Logger) error {
 	log.Info("bridging", "interface", iface, "mac", lan.Interface().MAC.String(), "listen", udp.Addr().String(), "peers", peers)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return (&bridge.Bridge{LAN: lan, UDP: udp, Log: log}).Run(ctx)
+	if statsInterval <= 0 {
+		statsInterval = -1
+	}
+	return (&bridge.Bridge{LAN: lan, UDP: udp, Log: log, StatsInterval: statsInterval}).Run(ctx)
 }

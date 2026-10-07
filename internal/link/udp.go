@@ -92,22 +92,31 @@ func (u *UDP) ReadFrameFrom(ctx context.Context) ([]byte, netip.AddrPort, error)
 }
 
 // WriteFrame implements Port.
-func (u *UDP) WriteFrame(frame []byte) error { return u.WriteFrameExcept(frame, netip.AddrPort{}) }
+func (u *UDP) WriteFrame(frame []byte) error {
+	_, err := u.WriteFrameExcept(frame, netip.AddrPort{})
+	return err
+}
 
 // WriteFrameExcept is WriteFrame that does not send to the peer except,
-// for relaying a frame between peers.
-func (u *UDP) WriteFrameExcept(frame []byte, except netip.AddrPort) error {
+// for relaying a frame between peers. It returns the number of peers the
+// frame was sent to.
+func (u *UDP) WriteFrameExcept(frame []byte, except netip.AddrPort) (int, error) {
 	frame = Pad(frame)
 	var err error
+	var sent int
 	for _, p := range u.destinations(frame) {
 		if p == except {
 			continue
 		}
-		if _, e := u.conn.WriteToUDPAddrPort(frame, p); e != nil && err == nil {
-			err = e
+		if _, e := u.conn.WriteToUDPAddrPort(frame, p); e != nil {
+			if err == nil {
+				err = e
+			}
+		} else {
+			sent++
 		}
 	}
-	return err
+	return sent, err
 }
 
 func (u *UDP) destinations(frame []byte) []netip.AddrPort {

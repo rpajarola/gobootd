@@ -1,4 +1,8 @@
-/bootd
-/test/emulator/bin/
-/test/emulator/roms/
-/test/emulator/netbsd/
+test/emulator/bin/
+test/emulator/roms/
+test/emulator/netbsd/
+
+main
+cmd/bootbridge/bootbridge
+
+.*.swp

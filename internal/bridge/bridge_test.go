@@ -628,5 +628,159 @@ func TestBridgePacketPrintingAndToggles(t *testing.T) {
 	outMu.Unlock()
 }
 
+func TestBridgePrintInterfaceFilter(t *testing.T) {
+	seg := linktest.NewSegment()
+	lanPort := seg.Station("02:00:00:00:00:fe")
+	hostA := seg.Station("08:00:20:00:00:10")
+	udp := listen(t)
+
+	var outBuf bytes.Buffer
+	var outMu sync.Mutex
+	pw := &syncWriter{w: &outBuf, mu: &outMu}
+
+	b := &Bridge{
+		LAN:            lanPort,
+		UDP:            udp,
+		Log:            slog.New(slog.DiscardHandler),
+		StatsInterval:  -1,
+		PacketWriter:   pw,
+		PrintPackets:   true,
+		PrintInterface: "udp",
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go b.Run(ctx)
+
+	peer1 := listen(t, udp.Addr())
+	mPeer1 := mac("02:00:00:00:00:11")
+	mHostA := mac("08:00:20:00:00:10")
+
+	if b.GetPrintInterface() != "udp" {
+		t.Errorf("expected print interface 'udp', got %q", b.GetPrintInterface())
+	}
+
+	// 1. Filter is "udp": LAN packet should NOT be printed
+	hostA.WriteFrame(link.Build(link.Broadcast, mHostA, 0x9000, []byte("lan-pkt-1")))
+	read(peer1)
+	time.Sleep(30 * time.Millisecond)
+
+	outMu.Lock()
+	if outBuf.Len() > 0 {
+		t.Errorf("expected no packet output for LAN packet when filter is udp, got:\n%s", outBuf.String())
+	}
+	outBuf.Reset()
+	outMu.Unlock()
+
+	// 2. Filter is "udp": UDP packet SHOULD be printed
+	peer1.WriteFrame(link.Build(link.Broadcast, mPeer1, 0x9000, []byte("udp-pkt-1")))
+	read(hostA)
+	time.Sleep(30 * time.Millisecond)
+
+	outMu.Lock()
+	out1 := outBuf.String()
+	outBuf.Reset()
+	outMu.Unlock()
+
+	if !strings.Contains(out1, "-> all") {
+		t.Errorf("expected UDP packet to be printed when filter is udp, got:\n%s", out1)
+	}
+
+	// 3. Cycle filter: "udp" -> "lan"
+	next := b.CyclePrintInterface()
+	if next != "lan" || b.GetPrintInterface() != "lan" {
+		t.Errorf("expected next interface to be 'lan', got %q", next)
+	}
+
+	// UDP packet should NOT be printed now
+	peer1.WriteFrame(link.Build(link.Broadcast, mPeer1, 0x9000, []byte("udp-pkt-2")))
+	read(hostA)
+	time.Sleep(30 * time.Millisecond)
+
+	outMu.Lock()
+	if outBuf.Len() > 0 {
+		t.Errorf("expected no packet output for UDP packet when filter is lan, got:\n%s", outBuf.String())
+	}
+	outBuf.Reset()
+	outMu.Unlock()
+
+	// LAN packet SHOULD be printed
+	hostA.WriteFrame(link.Build(link.Broadcast, mHostA, 0x9000, []byte("lan-pkt-2")))
+	read(peer1)
+	time.Sleep(30 * time.Millisecond)
+
+	outMu.Lock()
+	out2 := outBuf.String()
+	outBuf.Reset()
+	outMu.Unlock()
+
+	if !strings.Contains(out2, "station -> udp") {
+		t.Errorf("expected LAN packet to be printed when filter is lan, got:\n%s", out2)
+	}
+
+	// 4. Cycle filter: "lan" -> "all"
+	next = b.CyclePrintInterface()
+	if next != "all" || b.GetPrintInterface() != "all" {
+		t.Errorf("expected next interface to be 'all', got %q", next)
+	}
+
+	// Both should be printed
+	peer1.WriteFrame(link.Build(link.Broadcast, mPeer1, 0x9000, []byte("udp-pkt-3")))
+	read(hostA)
+	time.Sleep(30 * time.Millisecond)
+
+	outMu.Lock()
+	out3 := outBuf.String()
+	outBuf.Reset()
+	outMu.Unlock()
+
+	if !strings.Contains(out3, "-> all") {
+		t.Errorf("expected UDP packet in 'all' mode, got:\n%s", out3)
+	}
+
+	hostA.WriteFrame(link.Build(link.Broadcast, mHostA, 0x9000, []byte("lan-pkt-3")))
+	read(peer1)
+	time.Sleep(30 * time.Millisecond)
+
+	outMu.Lock()
+	out4 := outBuf.String()
+	outBuf.Reset()
+	outMu.Unlock()
+
+	if !strings.Contains(out4, "station -> udp") {
+		t.Errorf("expected LAN packet in 'all' mode, got:\n%s", out4)
+	}
+
+	// 5. Explicitly set filter to LAN interface name (e.g., b.LANName() = "station")
+	b.SetPrintInterface(b.LANName())
+	if b.GetPrintInterface() != b.LANName() {
+		t.Errorf("expected filter %q, got %q", b.LANName(), b.GetPrintInterface())
+	}
+
+	peer1.WriteFrame(link.Build(link.Broadcast, mPeer1, 0x9000, []byte("udp-pkt-4")))
+	read(hostA)
+	time.Sleep(30 * time.Millisecond)
+
+	outMu.Lock()
+	if outBuf.Len() > 0 {
+		t.Errorf("expected no UDP packet output when filter is %s, got:\n%s", b.LANName(), outBuf.String())
+	}
+	outBuf.Reset()
+	outMu.Unlock()
+
+	hostA.WriteFrame(link.Build(link.Broadcast, mHostA, 0x9000, []byte("lan-pkt-4")))
+	read(peer1)
+	time.Sleep(30 * time.Millisecond)
+
+	outMu.Lock()
+	out5 := outBuf.String()
+	outBuf.Reset()
+	outMu.Unlock()
+
+	if !strings.Contains(out5, "station -> udp") {
+		t.Errorf("expected LAN packet when filter is %s, got:\n%s", b.LANName(), out5)
+	}
+}
+
+
 
 

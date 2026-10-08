@@ -89,10 +89,12 @@ func mainCmdWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 	fs.BoolVar(printPkts, "p", false, "alias for -print")
 	dumpPkts := fs.Bool("X", false, "dump very verbose packet info (hex/ASCII, like tcpdump -X)")
 	fs.BoolVar(dumpPkts, "dump", false, "alias for -X")
+	printIface := fs.String("print-iface", "all", "interface to print packets for (udp, lan, all, or interface name)")
+	fs.StringVar(printIface, "print-interface", "all", "alias for -print-iface")
 	var peers peerList
 	fs.Var(&peers, "peer", "UDP peer that always receives frames (repeatable)")
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "usage: bootbridge -i interface [-listen addr:port] [-peer addr:port]... [-stats duration] [-v] [-print] [-X]\n")
+		fmt.Fprintf(stderr, "usage: bootbridge -i interface [-listen addr:port] [-peer addr:port]... [-stats duration] [-v] [-print] [-X] [-print-iface name]\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -105,19 +107,22 @@ func mainCmdWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 	if *dumpPkts {
 		*printPkts = true
 	}
+	if *printIface != "" && *printIface != "all" {
+		*printPkts = true
+	}
 	lvl := slog.LevelInfo
 	if *verbose {
 		lvl = slog.LevelDebug
 	}
 	log := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: lvl}))
-	if err := run(*iface, *listen, peers, *stats, *printPkts, *dumpPkts, stdin, stdout, log); err != nil {
+	if err := run(*iface, *listen, peers, *stats, *printPkts, *dumpPkts, *printIface, stdin, stdout, log); err != nil {
 		fmt.Fprintf(stderr, "bootbridge: %v\n", err)
 		return 1
 	}
 	return 0
 }
 
-func run(iface, listen string, peers []netip.AddrPort, statsInterval time.Duration, printPkts, dumpPkts bool, stdin io.Reader, stdout io.Writer, log *slog.Logger) error {
+func run(iface, listen string, peers []netip.AddrPort, statsInterval time.Duration, printPkts, dumpPkts bool, printIface string, stdin io.Reader, stdout io.Writer, log *slog.Logger) error {
 	addr, err := netip.ParseAddrPort(listen)
 	if err != nil {
 		return fmt.Errorf("-listen: %w", err)
@@ -143,13 +148,14 @@ func run(iface, listen string, peers []netip.AddrPort, statsInterval time.Durati
 		statsInterval = -1
 	}
 	b := &bridge.Bridge{
-		LAN:           lan,
-		UDP:           udp,
-		Log:           log,
-		StatsInterval: statsInterval,
-		PrintPackets:  printPkts,
-		DumpPackets:   dumpPkts,
-		PacketWriter:  stdout,
+		LAN:            lan,
+		UDP:            udp,
+		Log:            log,
+		StatsInterval:  statsInterval,
+		PrintPackets:   printPkts,
+		DumpPackets:    dumpPkts,
+		PrintInterface: printIface,
+		PacketWriter:   stdout,
 	}
 	if stdin != nil {
 		go handleKeyboard(ctx, stop, stdin, stdout, b, log)
@@ -162,7 +168,7 @@ func handleKeyboard(ctx context.Context, cancel context.CancelFunc, stdin io.Rea
 		if !term.IsTerminal(int(f.Fd())) || isBackground(f) {
 			return
 		}
-		fmt.Fprint(out, "[bootbridge] keyboard commands: p = toggle printing, x = toggle hex dump, s = show stats, q = quit, h = help\r\n")
+		fmt.Fprint(out, "[bootbridge] keyboard commands: p = toggle printing, x = toggle hex dump, i = cycle interface (all/udp/lan), u = udp only, l = lan only, a = all, s = show stats, q = quit, h = help\r\n")
 	}
 
 	buf := make([]byte, 1)
@@ -198,10 +204,32 @@ func handleKeyboard(ctx context.Context, cancel context.CancelFunc, stdin io.Rea
 					fmt.Fprint(out, "[bootbridge] extra verbose dump mode disabled\r\n")
 				}
 			}
+		case 'i', 'I':
+			next := b.CyclePrintInterface()
+			b.SetPrintPackets(true)
+			switch next {
+			case "udp":
+				fmt.Fprint(out, "[bootbridge] packet printing limited to udp\r\n")
+			case "lan":
+				fmt.Fprintf(out, "[bootbridge] packet printing limited to lan (%s)\r\n", b.LANName())
+			default:
+				fmt.Fprint(out, "[bootbridge] packet printing for all interfaces\r\n")
+			}
+		case 'u', 'U':
+			b.SetPrintInterface("udp")
+			b.SetPrintPackets(true)
+			fmt.Fprint(out, "[bootbridge] packet printing limited to udp\r\n")
+		case 'l', 'L':
+			b.SetPrintInterface("lan")
+			b.SetPrintPackets(true)
+			fmt.Fprintf(out, "[bootbridge] packet printing limited to lan (%s)\r\n", b.LANName())
+		case 'a', 'A':
+			b.SetPrintInterface("all")
+			fmt.Fprint(out, "[bootbridge] packet printing for all interfaces\r\n")
 		case 's', 'S':
 			b.LogStats()
 		case 'h', 'H', '?':
-			fmt.Fprint(out, "[bootbridge] keyboard commands: p = toggle printing, x = toggle hex dump, s = show stats, q = quit, h = help\r\n")
+			fmt.Fprint(out, "[bootbridge] keyboard commands: p = toggle printing, x = toggle hex dump, i = cycle interface (all/udp/lan), u = udp only, l = lan only, a = all, s = show stats, q = quit, h = help\r\n")
 		case 'q', 'Q', 0x03, 0x04: // 'q', 'Q', Ctrl-C, Ctrl-D
 			fmt.Fprint(out, "[bootbridge] quitting...\r\n")
 			if cancel != nil {

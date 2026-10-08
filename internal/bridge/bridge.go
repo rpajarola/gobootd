@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -64,11 +65,16 @@ type Bridge struct {
 	// DumpPackets enables extra verbose packet printing (hex/ASCII dump, like tcpdump -X).
 	DumpPackets bool
 
+	// PrintInterface limits packet printing to a specific interface ("udp", "lan", or interface name).
+	// If empty or "all", packets from all interfaces are printed.
+	PrintInterface string
+
 	// PacketWriter is where packets are printed. If nil, os.Stdout is used.
 	PacketWriter io.Writer
 
 	printPackets atomic.Bool
 	dumpPackets  atomic.Bool
+	printIface   atomic.Pointer[string]
 	printMu      sync.Mutex
 
 	mu       sync.Mutex
@@ -177,6 +183,72 @@ func (b *Bridge) IsDumpPackets() bool {
 	return b.dumpPackets.Load()
 }
 
+// LANName returns the display name of the LAN interface.
+func (b *Bridge) LANName() string {
+	return b.lanName()
+}
+
+// UDPName returns the display name of the UDP transport.
+func (b *Bridge) UDPName() string {
+	return b.udpName()
+}
+
+// SetPrintInterface sets the interface filter for packet printing ("udp", "lan", "all", or interface name).
+func (b *Bridge) SetPrintInterface(iface string) {
+	b.printIface.Store(&iface)
+}
+
+// GetPrintInterface returns the current interface filter for packet printing.
+func (b *Bridge) GetPrintInterface() string {
+	p := b.printIface.Load()
+	if p == nil {
+		if b.PrintInterface != "" {
+			return b.PrintInterface
+		}
+		return "all"
+	}
+	return *p
+}
+
+// CyclePrintInterface cycles the interface print filter through: all -> udp -> lan -> all.
+// It returns the newly selected interface filter.
+func (b *Bridge) CyclePrintInterface() string {
+	current := strings.ToLower(b.GetPrintInterface())
+	var next string
+	switch current {
+	case "all", "":
+		next = "udp"
+	case "udp":
+		next = "lan"
+	default:
+		next = "all"
+	}
+	b.SetPrintInterface(next)
+	return next
+}
+
+func isUDPIface(iface string) bool {
+	lower := strings.ToLower(iface)
+	return lower == "udp" || strings.HasPrefix(lower, "udp:")
+}
+
+func (b *Bridge) shouldPrintFor(iface string) bool {
+	filter := b.GetPrintInterface()
+	if filter == "" || strings.EqualFold(filter, "all") {
+		return true
+	}
+	filter = strings.ToLower(filter)
+
+	isUDP := isUDPIface(iface) || strings.EqualFold(iface, b.udpName())
+	if filter == "udp" || strings.EqualFold(filter, b.udpName()) {
+		return isUDP
+	}
+	if filter == "lan" || strings.EqualFold(filter, b.lanName()) {
+		return !isUDP
+	}
+	return strings.EqualFold(iface, filter)
+}
+
 func (b *Bridge) packetWriter() io.Writer {
 	if b.PacketWriter != nil {
 		return b.PacketWriter
@@ -184,8 +256,11 @@ func (b *Bridge) packetWriter() io.Writer {
 	return os.Stdout
 }
 
-func (b *Bridge) printPacket(prefix string, frame []byte) {
+func (b *Bridge) printPacket(iface, prefix string, frame []byte) {
 	if !b.IsPrintPackets() {
+		return
+	}
+	if !b.shouldPrintFor(iface) {
 		return
 	}
 	p := gopacket.NewPacket(frame, layers.LayerTypeEthernet, gopacket.Default)
@@ -299,6 +374,13 @@ func (b *Bridge) recordLANTx(bytes, pkts int, err error) {
 func (b *Bridge) Run(ctx context.Context) error {
 	b.printPackets.Store(b.PrintPackets)
 	b.dumpPackets.Store(b.DumpPackets)
+	if p := b.printIface.Load(); p == nil {
+		if b.PrintInterface != "" {
+			b.SetPrintInterface(b.PrintInterface)
+		} else {
+			b.SetPrintInterface("all")
+		}
+	}
 	b.mu.Lock()
 	b.lan = map[[6]byte]time.Time{}
 	b.udp = map[[6]byte]time.Time{}
@@ -489,12 +571,12 @@ func (b *Bridge) fromLAN(ctx context.Context) error {
 		// If destination is unicast and known on the same port (LAN), filter (drop).
 		if !multicast && dstOnLAN {
 			if b.IsDumpPackets() {
-				b.printPacket(b.lanName()+" (filtered)", frame)
+				b.printPacket(b.lanName(), b.lanName()+" (filtered)", frame)
 			}
 			continue
 		}
 
-		b.printPacket(b.lanName()+" -> udp", frame)
+		b.printPacket(b.lanName(), b.lanName()+" -> udp", frame)
 
 		if err := b.UDP.WriteFrame(frame); err != nil {
 			b.recordUDPTx(len(frame), 1, err)
@@ -578,11 +660,11 @@ func (b *Bridge) fromUDP(ctx context.Context) error {
 		sendLAN := multicast || !dstOnUDP
 
 		if relayPeers && sendLAN {
-			b.printPacket(b.udpName()+" -> all", frame)
+			b.printPacket(b.udpName(), b.udpName()+" -> all", frame)
 		} else if sendLAN {
-			b.printPacket(b.udpName()+" -> "+b.lanName(), frame)
+			b.printPacket(b.udpName(), b.udpName()+" -> "+b.lanName(), frame)
 		} else if relayPeers {
-			b.printPacket(b.udpName()+" -> peers", frame)
+			b.printPacket(b.udpName(), b.udpName()+" -> peers", frame)
 		}
 
 		if relayPeers {

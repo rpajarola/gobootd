@@ -61,6 +61,9 @@ func TestPrintAndDumpFlags(t *testing.T) {
 	if !strings.Contains(errs, "-X") {
 		t.Errorf("expected -X in usage, got %s", errs)
 	}
+	if !strings.Contains(errs, "-print-iface") {
+		t.Errorf("expected -print-iface in usage, got %s", errs)
+	}
 }
 
 func TestKeyboardCommands(t *testing.T) {
@@ -90,3 +93,34 @@ func TestKeyboardCommands(t *testing.T) {
 		t.Error("expected cancel to be called on 'q'")
 	}
 }
+
+func TestKeyboardInterfaceCommands(t *testing.T) {
+	b := &bridge.Bridge{}
+	// Single key presses:
+	// 'u' -> UDP only
+	// 'l' -> LAN only
+	// 'a' -> all
+	// 'i' -> cycle to udp
+	// 'q' -> quit
+	input := "ulaiq"
+	var out bytes.Buffer
+	var canceled bool
+	cancel := func() { canceled = true }
+
+	handleKeyboard(context.Background(), cancel, strings.NewReader(input), &out, b, nil)
+	output := out.String()
+
+	if !strings.Contains(output, "packet printing limited to udp") {
+		t.Errorf("expected udp message, got:\n%s", output)
+	}
+	if !strings.Contains(output, "packet printing limited to lan") {
+		t.Errorf("expected lan message, got:\n%s", output)
+	}
+	if !strings.Contains(output, "packet printing for all interfaces") {
+		t.Errorf("expected all message, got:\n%s", output)
+	}
+	if !canceled {
+		t.Error("expected cancel to be called on 'q'")
+	}
+}
+

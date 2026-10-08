@@ -18,12 +18,17 @@ sudo bootbridge -i en0 -listen 127.0.0.1:4711 -peer 127.0.0.1:4712
 | `-v` | off | log every forwarding error |
 | `-print` / `-p` | off | print packets as they pass through the bridge |
 | `-X` / `-dump` | off | dump very verbose packet info (hex/ASCII dump, like tcpdump -X) |
+| `-print-iface` | `all` | limit packet printing to an interface (`udp`, `lan`, `all`, or interface name) |
 
 ### Interactive keyboard controls
 
 While running interactively in a terminal, press any key directly (no need to press Enter):
 - `p` (or `[Space]` / `[Enter]`): toggle packet printing on and off.
 - `x` (or `v` / `d`): toggle extra verbose packet dumping (`tcpdump -X` format).
+- `i`: cycle interface print filter (`all` &rarr; `udp` &rarr; `lan` &rarr; `all`).
+- `u`: limit packet printing to the UDP transport only.
+- `l`: limit packet printing to the LAN interface only.
+- `a`: print packets from all interfaces.
 - `s`: print current interface statistics on demand.
 - `q`: quit cleanly.
 - `h` or `?`: show keyboard help.

@@ -16,6 +16,17 @@ sudo bootbridge -i en0 -listen 127.0.0.1:4711 -peer 127.0.0.1:4712
 | `-peer` | none | UDP peer that always receives frames (repeatable) |
 | `-stats` | `30s` | interval to log interface statistics (0 to disable) |
 | `-v` | off | log every forwarding error |
+| `-print` / `-p` | off | print packets as they pass through the bridge |
+| `-X` / `-dump` | off | dump very verbose packet info (hex/ASCII dump, like tcpdump -X) |
+
+### Interactive keyboard controls
+
+While running interactively in a terminal, press any key directly (no need to press Enter):
+- `p` (or `[Space]` / `[Enter]`): toggle packet printing on and off.
+- `x` (or `v` / `d`): toggle extra verbose packet dumping (`tcpdump -X` format).
+- `s`: print current interface statistics on demand.
+- `q`: quit cleanly.
+- `h` or `?`: show keyboard help.
 
 bootd then uses a network block such as:
 

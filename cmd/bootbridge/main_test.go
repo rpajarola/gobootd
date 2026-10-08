@@ -2,8 +2,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
+
+	"github.com/rpajarola/gobootd/internal/bridge"
 )
 
 func runCmd(args ...string) (code int, stderr string) {
@@ -44,5 +47,46 @@ func TestInvalidListen(t *testing.T) {
 	}
 	if !strings.Contains(errs, "-listen:") {
 		t.Errorf("expected -listen error, got %s", errs)
+	}
+}
+
+func TestPrintAndDumpFlags(t *testing.T) {
+	code, errs := runCmd("-h")
+	if code != 2 {
+		t.Fatalf("expected code 2, got %d", code)
+	}
+	if !strings.Contains(errs, "-print") {
+		t.Errorf("expected -print in usage, got %s", errs)
+	}
+	if !strings.Contains(errs, "-X") {
+		t.Errorf("expected -X in usage, got %s", errs)
+	}
+}
+
+func TestKeyboardCommands(t *testing.T) {
+	b := &bridge.Bridge{}
+	// Single key presses without enter: 'p', 'x', 's', 'h', 'q'
+	input := "pxshq"
+	var out bytes.Buffer
+	var canceled bool
+	cancel := func() { canceled = true }
+
+	handleKeyboard(context.Background(), cancel, strings.NewReader(input), &out, b, nil)
+	output := out.String()
+
+	if !strings.Contains(output, "packet printing enabled (summary mode)") {
+		t.Errorf("expected toggle print enabled message, got:\n%s", output)
+	}
+	if !strings.Contains(output, "extra verbose dump mode enabled") {
+		t.Errorf("expected extra verbose dump message, got:\n%s", output)
+	}
+	if !strings.Contains(output, "keyboard commands:") {
+		t.Errorf("expected help message, got:\n%s", output)
+	}
+	if !strings.Contains(output, "quitting...") {
+		t.Errorf("expected quitting message, got:\n%s", output)
+	}
+	if !canceled {
+		t.Error("expected cancel to be called on 'q'")
 	}
 }

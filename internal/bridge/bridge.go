@@ -7,12 +7,18 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/netip"
+	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/gopacket/gopacket"
+	"github.com/gopacket/gopacket/layers"
 	"github.com/rpajarola/gobootd/internal/link"
 )
 
@@ -51,6 +57,19 @@ type Bridge struct {
 	// StatsInterval is how often interface statistics are logged.
 	// If zero, it defaults to 30 seconds. If negative, periodic logging is disabled.
 	StatsInterval time.Duration
+
+	// PrintPackets enables printing packets as they pass through the bridge.
+	PrintPackets bool
+
+	// DumpPackets enables extra verbose packet printing (hex/ASCII dump, like tcpdump -X).
+	DumpPackets bool
+
+	// PacketWriter is where packets are printed. If nil, os.Stdout is used.
+	PacketWriter io.Writer
+
+	printPackets atomic.Bool
+	dumpPackets  atomic.Bool
+	printMu      sync.Mutex
 
 	mu       sync.Mutex
 	lanMAC   [6]byte
@@ -115,6 +134,68 @@ func (b *Bridge) pruneLocked(now time.Time) {
 		if now.Sub(t) >= lanTimeout {
 			delete(b.udp, m)
 		}
+	}
+}
+
+// SetPrintPackets sets whether packet printing is enabled.
+func (b *Bridge) SetPrintPackets(enabled bool) {
+	b.printPackets.Store(enabled)
+}
+
+// SetDumpPackets sets whether extra verbose packet dumping is enabled.
+func (b *Bridge) SetDumpPackets(enabled bool) {
+	b.dumpPackets.Store(enabled)
+}
+
+// TogglePrintPackets toggles packet printing on or off and returns the new state.
+func (b *Bridge) TogglePrintPackets() bool {
+	for {
+		old := b.printPackets.Load()
+		if b.printPackets.CompareAndSwap(old, !old) {
+			return !old
+		}
+	}
+}
+
+// ToggleDumpPackets toggles extra verbose packet dumping on or off and returns the new state.
+func (b *Bridge) ToggleDumpPackets() bool {
+	for {
+		old := b.dumpPackets.Load()
+		if b.dumpPackets.CompareAndSwap(old, !old) {
+			return !old
+		}
+	}
+}
+
+// IsPrintPackets reports whether packet printing is enabled.
+func (b *Bridge) IsPrintPackets() bool {
+	return b.printPackets.Load() || b.dumpPackets.Load()
+}
+
+// IsDumpPackets reports whether extra verbose packet dumping is enabled.
+func (b *Bridge) IsDumpPackets() bool {
+	return b.dumpPackets.Load()
+}
+
+func (b *Bridge) packetWriter() io.Writer {
+	if b.PacketWriter != nil {
+		return b.PacketWriter
+	}
+	return os.Stdout
+}
+
+func (b *Bridge) printPacket(prefix string, frame []byte) {
+	if !b.IsPrintPackets() {
+		return
+	}
+	p := gopacket.NewPacket(frame, layers.LayerTypeEthernet, gopacket.Default)
+	w := b.packetWriter()
+	b.printMu.Lock()
+	defer b.printMu.Unlock()
+	if b.IsDumpPackets() {
+		fmt.Fprintf(w, "[%s]\n%s\n", prefix, p.Dump())
+	} else {
+		fmt.Fprintf(w, "[%s] %s\n", prefix, p.String())
 	}
 }
 
@@ -216,6 +297,8 @@ func (b *Bridge) recordLANTx(bytes, pkts int, err error) {
 
 // Run forwards frames until ctx is done or a port fails.
 func (b *Bridge) Run(ctx context.Context) error {
+	b.printPackets.Store(b.PrintPackets)
+	b.dumpPackets.Store(b.DumpPackets)
 	b.mu.Lock()
 	b.lan = map[[6]byte]time.Time{}
 	b.udp = map[[6]byte]time.Time{}
@@ -405,8 +488,13 @@ func (b *Bridge) fromLAN(ctx context.Context) error {
 		// Standard Ethernet switch filtering:
 		// If destination is unicast and known on the same port (LAN), filter (drop).
 		if !multicast && dstOnLAN {
+			if b.IsDumpPackets() {
+				b.printPacket(b.lanName()+" (filtered)", frame)
+			}
 			continue
 		}
+
+		b.printPacket(b.lanName()+" -> udp", frame)
 
 		if err := b.UDP.WriteFrame(frame); err != nil {
 			b.recordUDPTx(len(frame), 1, err)
@@ -488,6 +576,14 @@ func (b *Bridge) fromUDP(ctx context.Context) error {
 		// - Unicast unknown: flood to BOTH.
 		relayPeers := multicast || !dstOnLAN
 		sendLAN := multicast || !dstOnUDP
+
+		if relayPeers && sendLAN {
+			b.printPacket(b.udpName()+" -> all", frame)
+		} else if sendLAN {
+			b.printPacket(b.udpName()+" -> "+b.lanName(), frame)
+		} else if relayPeers {
+			b.printPacket(b.udpName()+" -> peers", frame)
+		}
 
 		if relayPeers {
 			if n, err := b.UDP.WriteFrameExcept(frame, from); err != nil {

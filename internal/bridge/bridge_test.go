@@ -514,4 +514,119 @@ func TestBridgeSwitchFiltering(t *testing.T) {
 	}
 }
 
+func TestBridgePacketPrintingAndToggles(t *testing.T) {
+	seg := linktest.NewSegment()
+	lanPort := seg.Station("02:00:00:00:00:fe")
+	hostA := seg.Station("08:00:20:00:00:10")
+	udp := listen(t)
+
+	var outBuf bytes.Buffer
+	var outMu sync.Mutex
+	pw := &syncWriter{w: &outBuf, mu: &outMu}
+
+	b := &Bridge{
+		LAN:           lanPort,
+		UDP:           udp,
+		Log:           slog.New(slog.DiscardHandler),
+		StatsInterval: -1,
+		PacketWriter:  pw,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go b.Run(ctx)
+
+	peer1 := listen(t, udp.Addr())
+	mPeer1 := mac("02:00:00:00:00:11")
+	mHostA := mac("08:00:20:00:00:10")
+
+	// Initially, packet printing is off. Send a frame and verify nothing was printed.
+	peer1.WriteFrame(link.Build(link.Broadcast, mPeer1, 0x9000, []byte("quiet1")))
+	read(hostA)
+	time.Sleep(20 * time.Millisecond)
+
+	outMu.Lock()
+	if outBuf.Len() > 0 {
+		t.Errorf("expected no packet output when disabled, got:\n%s", outBuf.String())
+	}
+	outMu.Unlock()
+
+	// 1. Toggle packet printing ON (summary mode)
+	if !b.TogglePrintPackets() {
+		t.Error("expected TogglePrintPackets to return true")
+	}
+	if !b.IsPrintPackets() {
+		t.Error("expected IsPrintPackets to be true")
+	}
+	if b.IsDumpPackets() {
+		t.Error("expected IsDumpPackets to be false")
+	}
+
+	// Send frame from peer1
+	peer1.WriteFrame(link.Build(link.Broadcast, mPeer1, 0x9000, []byte("summary-test")))
+	read(hostA)
+	time.Sleep(30 * time.Millisecond)
+
+	outMu.Lock()
+	out1 := outBuf.String()
+	outBuf.Reset()
+	outMu.Unlock()
+
+	if !strings.Contains(out1, "-> all") || !strings.Contains(out1, "Ethernet") {
+		t.Errorf("expected summary packet output, got:\n%s", out1)
+	}
+	// In summary mode, it should not have hex dump offset prefix "00000000"
+	if strings.Contains(out1, "00000000") {
+		t.Errorf("did not expect hex dump in summary mode, got:\n%s", out1)
+	}
+
+	// 2. Toggle DumpPackets ON (extra verbose dump mode)
+	if !b.ToggleDumpPackets() {
+		t.Error("expected ToggleDumpPackets to return true")
+	}
+	if !b.IsDumpPackets() {
+		t.Error("expected IsDumpPackets to be true")
+	}
+
+	// Send frame from hostA on LAN
+	hostA.WriteFrame(link.Build(link.Broadcast, mHostA, 0x9000, []byte("dump-test")))
+	read(peer1)
+	time.Sleep(30 * time.Millisecond)
+
+	outMu.Lock()
+	out2 := outBuf.String()
+	outBuf.Reset()
+	outMu.Unlock()
+
+	if !strings.Contains(out2, "station -> udp") {
+		t.Errorf("expected station -> udp prefix in dump mode, got:\n%s", out2)
+	}
+	// In dump mode (gopacket Dump()), hex dump offset "00000000" is present
+	if !strings.Contains(out2, "00000000") {
+		t.Errorf("expected hex dump in dump mode, got:\n%s", out2)
+	}
+
+	// 3. Toggle DumpPackets OFF
+	if b.ToggleDumpPackets() {
+		t.Error("expected ToggleDumpPackets to return false")
+	}
+	// 4. Toggle PrintPackets OFF
+	if b.TogglePrintPackets() {
+		t.Error("expected TogglePrintPackets to return false")
+	}
+	if b.IsPrintPackets() {
+		t.Error("expected IsPrintPackets to be false")
+	}
+
+	peer1.WriteFrame(link.Build(link.Broadcast, mPeer1, 0x9000, []byte("quiet2")))
+	read(hostA)
+	time.Sleep(20 * time.Millisecond)
+
+	outMu.Lock()
+	if outBuf.Len() > 0 {
+		t.Errorf("expected no packet output after toggle off, got:\n%s", outBuf.String())
+	}
+	outMu.Unlock()
+}
+
+
 

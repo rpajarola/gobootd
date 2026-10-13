@@ -21,6 +21,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/hashicorp/hcl/v2"
+	"github.com/hashicorp/hcl/v2/hclparse"
 	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 
@@ -39,22 +41,13 @@ func (c *crlfWriter) Write(p []byte) (n int, err error) {
 	return len(p), err
 }
 
-type peerList []netip.AddrPort
+// stringList is a repeatable flag.
+type stringList []string
 
-func (p *peerList) String() string {
-	var s []string
-	for _, a := range *p {
-		s = append(s, a.String())
-	}
-	return strings.Join(s, ",")
-}
+func (l *stringList) String() string { return strings.Join(*l, ",") }
 
-func (p *peerList) Set(v string) error {
-	a, err := netip.ParseAddrPort(v)
-	if err != nil {
-		return err
-	}
-	*p = append(*p, a)
+func (l *stringList) Set(v string) error {
+	*l = append(*l, v)
 	return nil
 }
 
@@ -83,65 +76,92 @@ func mainCmdWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 	}
 	fs := flag.NewFlagSet("bootbridge", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	var o options
-	fs.StringVar(&o.iface, "i", "", "network interface to bridge (required)")
-	fs.StringVar(&o.listen, "listen", "127.0.0.1:4711", "UDP address to exchange raw frames on (\"\" for none)")
-	fs.Var(&o.peers, "peer", "raw UDP peer that always receives frames (repeatable)")
-	fs.StringVar(&o.l2tp, "l2tp", "", "UDP address to exchange L2TPv3 frames on")
-	fs.Var(&o.l2tpPeers, "l2tp-peer", "L2TPv3 peer that always receives frames (repeatable)")
-	session := fs.Uint("session", 1, "L2TPv3 session ID")
-	cookie := fs.String("cookie", "", "L2TPv3 cookie, 8 or 16 hex digits")
-	counter := fs.Bool("counter", true, "L2TPv3 L2-specific sublayer with a sequence number")
-	stats := fs.Duration("stats", 30*time.Second, "interval to log interface statistics (0 to disable)")
-	verbose := fs.Bool("v", false, "log every forwarding error")
-	fs.BoolVar(&o.printPkts, "print", false, "print packets as they pass through the bridge")
-	fs.BoolVar(&o.printPkts, "p", false, "alias for -print")
-	fs.BoolVar(&o.dumpPkts, "X", false, "dump very verbose packet info (hex/ASCII, like tcpdump -X)")
-	fs.BoolVar(&o.dumpPkts, "dump", false, "alias for -X")
-	fs.StringVar(&o.printIface, "print-iface", "all", "interface to print packets for (udp, lan, all, or interface name)")
-	fs.StringVar(&o.printIface, "print-interface", "all", "alias for -print-iface")
+	d := defaults()
+	var f settings
+	var peers, l2tpPeers stringList
+	config := fs.String("c", "", "configuration file; flags given override it")
+	fs.StringVar(&f.iface, "i", "", "network interface to bridge (required)")
+	fs.StringVar(&f.listen, "listen", d.listen, "UDP address to exchange raw frames on (\"\" for none)")
+	fs.Var(&peers, "peer", "raw UDP peer that always receives frames (repeatable)")
+	fs.StringVar(&f.l2tp, "l2tp", "", "UDP address to exchange L2TPv3 frames on")
+	fs.Var(&l2tpPeers, "l2tp-peer", "L2TPv3 peer that always receives frames (repeatable)")
+	fs.Uint64Var(&f.session, "session", d.session, "L2TPv3 session ID")
+	fs.StringVar(&f.cookie, "cookie", "", "L2TPv3 cookie, 8 or 16 hex digits")
+	fs.BoolVar(&f.counter, "counter", d.counter, "L2TPv3 L2-specific sublayer with a sequence number")
+	fs.DurationVar(&f.stats, "stats", d.stats, "interval to log interface statistics (0 to disable)")
+	fs.BoolVar(&f.verbose, "v", false, "log every forwarding error")
+	fs.BoolVar(&f.print, "print", false, "print packets as they pass through the bridge")
+	fs.BoolVar(&f.print, "p", false, "alias for -print")
+	fs.BoolVar(&f.dump, "X", false, "dump very verbose packet info (hex/ASCII, like tcpdump -X)")
+	fs.BoolVar(&f.dump, "dump", false, "alias for -X")
+	fs.StringVar(&f.printIface, "print-iface", d.printIface, "interface to print packets for (udp, lan, all, or interface name)")
+	fs.StringVar(&f.printIface, "print-interface", d.printIface, "alias for -print-iface")
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "usage: bootbridge -i interface [-listen addr:port] [-peer addr:port]... [-l2tp addr:port [-l2tp-peer addr:port]... [-session id] [-cookie hex] [-counter=false]] [-stats duration] [-v] [-print] [-X] [-print-iface name]\n")
+		fmt.Fprintf(stderr, "usage: bootbridge [-c config] -i interface [-listen addr:port] [-peer addr:port]... [-l2tp addr:port [-l2tp-peer addr:port]... [-session id] [-cookie hex] [-counter=false]] [-stats duration] [-v] [-print] [-X] [-print-iface name]\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if o.iface == "" || fs.NArg() != 0 {
+	if fs.NArg() != 0 || len(args) == 0 {
 		fs.Usage()
 		return 2
 	}
-	if o.l2tp != "" {
-		if *session == 0 || *session > 0xffffffff {
-			fmt.Fprintf(stderr, "bootbridge: -session must be 1 to 4294967295\n")
+	f.peers, f.l2tpPeers = peers, l2tpPeers
+
+	// The configuration file, then the flags given on top of it.
+	s := d
+	if *config != "" {
+		var p *hclparse.Parser
+		var diags hcl.Diagnostics
+		s, p, diags = loadConfig(*config)
+		if len(diags) > 0 {
+			hcl.NewDiagnosticTextWriter(stderr, p.Files(), 0, false).WriteDiagnostics(diags)
+		}
+		if diags.HasErrors() {
 			return 2
 		}
-		o.l2tpCfg = &link.L2TPv3{Session: uint32(*session), Counter: *counter}
-		if *cookie != "" {
-			c, err := link.ParseCookie(*cookie)
-			if err != nil {
-				fmt.Fprintf(stderr, "bootbridge: -cookie: %v\n", err)
-				return 2
-			}
-			o.l2tpCfg.Cookie = c
+	}
+	fs.Visit(func(fl *flag.Flag) {
+		switch fl.Name {
+		case "i":
+			s.iface = f.iface
+		case "listen":
+			s.listen = f.listen
+		case "peer":
+			s.peers = f.peers
+		case "l2tp":
+			s.l2tp = f.l2tp
+		case "l2tp-peer":
+			s.l2tpPeers = f.l2tpPeers
+		case "session":
+			s.session = f.session
+		case "cookie":
+			s.cookie = f.cookie
+		case "counter":
+			s.counter = f.counter
+		case "stats":
+			s.stats = f.stats
+		case "v":
+			s.verbose = f.verbose
+		case "print", "p":
+			s.print = f.print
+		case "X", "dump":
+			s.dump = f.dump
+		case "print-iface", "print-interface":
+			s.printIface = f.printIface
 		}
-	} else if *cookie != "" || len(o.l2tpPeers) > 0 {
-		fmt.Fprintf(stderr, "bootbridge: -cookie and -l2tp-peer need -l2tp\n")
+	})
+	o, err := s.check()
+	if err != nil {
+		fmt.Fprintf(stderr, "bootbridge: %v\n", err)
+		if s.iface == "" {
+			fs.Usage()
+		}
 		return 2
 	}
-	if o.listen == "" && o.l2tp == "" {
-		fmt.Fprintf(stderr, "bootbridge: need -listen or -l2tp\n")
-		return 2
-	}
-	if o.dumpPkts {
-		o.printPkts = true
-	}
-	if o.printIface != "" && o.printIface != "all" {
-		o.printPkts = true
-	}
-	o.stats = *stats
 	lvl := slog.LevelInfo
-	if *verbose {
+	if s.verbose {
 		lvl = slog.LevelDebug
 	}
 	log := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: lvl}))
@@ -155,7 +175,7 @@ func mainCmdWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 type options struct {
 	iface            string
 	listen, l2tp     string
-	peers, l2tpPeers peerList
+	peers, l2tpPeers []netip.AddrPort
 	l2tpCfg          *link.L2TPv3
 	stats            time.Duration
 	printPkts        bool

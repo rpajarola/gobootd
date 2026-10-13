@@ -124,7 +124,6 @@ func TestKeyboardInterfaceCommands(t *testing.T) {
 	}
 }
 
-
 func TestL2TPFlags(t *testing.T) {
 	for _, tc := range []struct {
 		args []string

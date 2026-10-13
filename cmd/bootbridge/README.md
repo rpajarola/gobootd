@@ -22,6 +22,7 @@ sudo bootbridge -i en0 -l2tp 0.0.0.0:1701 -cookie 0x0123456789abcdef
 
 | Flag | Default | Meaning |
 |---|---|---|
+| `-c` | none | configuration file (see below) |
 | `-i` | (required) | network interface to bridge |
 | `-listen` | `127.0.0.1:4711` | UDP address to exchange raw frames on (`""` for none) |
 | `-peer` | none | raw UDP peer that always receives frames (repeatable) |
@@ -35,6 +36,35 @@ sudo bootbridge -i en0 -l2tp 0.0.0.0:1701 -cookie 0x0123456789abcdef
 | `-print` / `-p` | off | print packets as they pass through the bridge |
 | `-X` / `-dump` | off | dump very verbose packet info (hex/ASCII dump, like tcpdump -X) |
 | `-print-iface` | `all` | limit packet printing to an interface (`udp`, `lan`, `all`, or interface name) |
+
+### Configuration file
+
+The same settings can live in an HCL file, the format bootd uses
+([`etc/bootbridge.hcl`](../../etc/bootbridge.hcl) is an example):
+
+```hcl
+interface = "en0"
+
+raw {
+  listen = "127.0.0.1:4711"
+}
+
+l2tp {
+  listen = "0.0.0.0:1701"
+  cookie = "0x0123456789abcdef"
+}
+```
+
+```
+sudo bootbridge -c /etc/bootbridge.hcl
+```
+
+Only the listeners the file declares are opened: without a `raw` block
+there is no raw listener. Flags given on the command line override the
+file's values, so `-v` or `-print` work as usual; `-peer` and `-l2tp-peer`
+replace the file's peer lists. Errors are reported with file and line. A
+file holding a cookie should be readable by root only; bootbridge warns
+if anyone can read it.
 
 ### Interactive keyboard controls
 

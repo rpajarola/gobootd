@@ -20,6 +20,7 @@ import (
 	"github.com/rpajarola/gobootd/internal/daemon"
 	_ "github.com/rpajarola/gobootd/internal/proto/bootparam"
 	_ "github.com/rpajarola/gobootd/internal/proto/nfs"
+	_ "github.com/rpajarola/gobootd/internal/proto/nis"
 	_ "github.com/rpajarola/gobootd/internal/proto/rarp"
 	_ "github.com/rpajarola/gobootd/internal/proto/tftp"
 )

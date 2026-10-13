@@ -135,3 +135,45 @@ func TestGetfile(t *testing.T) {
 		t.Errorf("GETPORT: %v", err)
 	}
 }
+
+// TestWhoamiNISDomain: without a domain option, hosts that may use NIS get
+// the nis service's domain, so SunOS starts ypbind; others get none.
+func TestWhoamiNISDomain(t *testing.T) {
+	dir := t.TempDir()
+	os.Mkdir(filepath.Join(dir, "root"), 0o755)
+	e := prototest.Setup(t, dir, `
+network "lan" {
+  address = "192.168.1.1/24"
+  udp     = "127.0.0.1:0"
+}
+service "bootparam" {}
+service "nis" { domain = "lab" }
+host "kali" {
+  ip       = "192.168.1.5"
+  services = ["bootparam", "nis"]
+  export "root" { path = "root" }
+}
+host "other" {
+  ip       = "192.168.1.6"
+  services = ["bootparam"]
+  export "root" { path = "root" }
+}
+`)
+	e.Start(t, &Server{}, "bootparam")
+	st := e.Client(t, "08:00:20:01:02:03", "192.168.1.5/24")
+	l, err := st.ListenUDP(1023)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	c := &oncrpc.Client{L: l, Timeout: 200 * time.Millisecond, Tries: 2}
+	for ip, want := range map[string]string{"192.168.1.5": "lab", "192.168.1.6": ""} {
+		res, _, err := c.Call(ctx, server, Prog, Vers, ProcWhoami, whoamiArgs(ip))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.String(255); res.String(255) != want {
+			t.Errorf("%s: domain not %q", ip, want)
+		}
+	}
+}

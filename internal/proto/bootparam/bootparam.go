@@ -18,6 +18,9 @@ import (
 	"os"
 	"strings"
 
+	"github.com/hashicorp/hcl/v2"
+	"github.com/hashicorp/hcl/v2/gohcl"
+
 	"github.com/rpajarola/gobootd/internal/daemon"
 	"github.com/rpajarola/gobootd/internal/inventory"
 	"github.com/rpajarola/gobootd/internal/netif"
@@ -45,7 +48,8 @@ type Options struct {
 	// ServerName is the name announced for exports without a server.
 	// Defaults to the host name up to the first dot.
 	ServerName string `hcl:"server_name,optional"`
-	// Domain is the NIS domain announced to clients. Default empty.
+	// Domain is the NIS domain announced to clients. Defaults to the
+	// domain of the nis service, for hosts that may use it.
 	Domain string `hcl:"domain,optional"`
 	// Router is the default router announced to clients. Defaults to
 	// bootd's address on the network, like FreeBSD's bootparamd.
@@ -140,10 +144,14 @@ func (s *Server) whoami(env *daemon.Env, n *netif.Network, c *oncrpc.Call) ([]by
 		return nil, oncrpc.ErrDrop
 	}
 	router := s.routerFor(n)
+	domain := s.opts.Domain
+	if domain == "" && h.Allows(service.NIS) == nil {
+		domain = nisDomain(env.Inventory())
+	}
 	e := &oncrpc.Encoder{}
-	e.String(h.Name).String(s.opts.Domain)
+	e.String(h.Name).String(domain)
 	encodeAddr(e, router)
-	log.Info(fmt.Sprintf("bootparam whoami from %s: %s", ip, h.Name), "domain", s.opts.Domain, "router", router.String())
+	log.Info(fmt.Sprintf("bootparam whoami from %s: %s", ip, h.Name), "domain", domain, "router", router.String())
 	return e.Bytes(), nil
 }
 
@@ -201,6 +209,21 @@ func (s *Server) getfile(env *daemon.Env, n *netif.Network, c *oncrpc.Call) ([]b
 	e.String(x.ExportPath)
 	log.Info(fmt.Sprintf("bootparam getfile %s from %s: %s:%s", key, h.Name, server, x.ExportPath), "server_address", addr.String())
 	return e.Bytes(), nil
+}
+
+// nisDomain returns the domain of the nis service, or "". SunOS sets its
+// domain name from WHOAMI and starts ypbind if it is not empty.
+func nisDomain(inv *inventory.Inventory) string {
+	svc := inv.Services[service.NIS]
+	if svc == nil {
+		return ""
+	}
+	var opts struct {
+		Domain string   `hcl:"domain,optional"`
+		Rest   hcl.Body `hcl:",remain"`
+	}
+	gohcl.DecodeBody(svc.Options, nil, &opts)
+	return opts.Domain
 }
 
 // routerFor returns the router announced on n.

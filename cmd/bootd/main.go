@@ -18,6 +18,7 @@ import (
 	_ "github.com/rpajarola/gobootd/internal/proto/bootparam"
 	_ "github.com/rpajarola/gobootd/internal/proto/nd"
 	_ "github.com/rpajarola/gobootd/internal/proto/nfs"
+	_ "github.com/rpajarola/gobootd/internal/proto/nis"
 	_ "github.com/rpajarola/gobootd/internal/proto/rarp"
 	_ "github.com/rpajarola/gobootd/internal/proto/rmp"
 	_ "github.com/rpajarola/gobootd/internal/proto/tftp"

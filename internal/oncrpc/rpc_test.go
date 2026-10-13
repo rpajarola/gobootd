@@ -191,3 +191,67 @@ func TestXDR(t *testing.T) {
 		t.Error("accepted a truncated opaque")
 	}
 }
+
+// TestTCP calls a program announced over TCP, with the call split into
+// several fragments.
+func TestTCP(t *testing.T) {
+	seg := linktest.NewSegment()
+	srv := stack(t, seg, "02:00:00:00:00:01", server+"/24")
+	d := NewDispatcher(srv)
+	echo := func(c *Call) ([]byte, error) {
+		return (&Encoder{}).String(string(c.Args.Rest())).Bool(c.TCP).Bytes(), nil
+	}
+	d.Register(&Program{Prog: echoProg, Vers: 2, TCP: true, Procs: map[uint32]Proc{1: echo}})
+	d.Register(&Program{Prog: echoProg + 1, Vers: 1, Procs: map[uint32]Proc{1: echo}})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { d.Run(ctx); close(done) }()
+	t.Cleanup(func() { cancel(); <-done })
+	cl := stack(t, seg, "02:00:00:00:00:02", "10.0.0.2/24")
+	time.Sleep(20 * time.Millisecond)
+
+	conn, err := cl.DialTCP(ctx, addr(PortmapPort))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	c := &TCPClient{Conn: conn}
+	getport := func(prog uint32) uint32 {
+		res, err := c.Call(PortmapProg, 2, 3, (&Encoder{}).Uint32(prog).Uint32(1).Uint32(protoTCP).Uint32(0).Bytes())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res.Uint32()
+	}
+	if p := getport(echoProg); p != PortmapPort {
+		t.Errorf("GETPORT over TCP = %d", p)
+	}
+	if p := getport(echoProg + 1); p != 0 {
+		t.Errorf("GETPORT over TCP for a UDP only program = %d", p)
+	}
+
+	msg := EncodeCall(77, echoProg, 2, 1, nil, []byte("abcd"))
+	var frags []byte
+	for i, part := range [][]byte{msg[:10], msg[10:]} {
+		h := uint32(len(part))
+		if i == 1 {
+			h |= 0x80000000
+		}
+		frags = append(frags, byte(h>>24), byte(h>>16), byte(h>>8), byte(h))
+		frags = append(frags, part...)
+	}
+	if _, err := conn.Write(frags); err != nil {
+		t.Fatal(err)
+	}
+	reply, err := ReadRecord(conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	xid, res, err := DecodeReply(reply)
+	if err != nil || xid != 77 {
+		t.Fatalf("xid %d: %v", xid, err)
+	}
+	if s, tcp := res.String(10), res.Bool(); s != "abcd" || !tcp {
+		t.Errorf("echo %q tcp %v", s, tcp)
+	}
+}

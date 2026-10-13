@@ -64,10 +64,17 @@ service "tftp" {
 }
 service "bootparam" {
   # server_name = "aiax"         # announced as the NFS server; default: host name
-  # domain      = ""             # NIS domain
+  # domain      = ""             # NIS domain; default: the nis service's, for hosts using nis
   # router      = "192.168.1.1"  # default: bootd's address on the network
 }
 service "nfs" {}
+# NIS for SunOS and friends. Maps are made from passwd, group, hosts,
+# aliases, ... (in /etc format) in the maps directory, plus the hosts below.
+# service "nis" {
+#   domain      = "lab"
+#   maps        = "yp"       # relative to root
+#   server_name = "aiax"     # NIS master name, added to hosts; default: host name
+# }
 
 # HP 9000/300 and /400: RMP picks the class by the machine type the boot
 # ROM sends (an HP 425t sends "HPS300"), so new machines boot without a host

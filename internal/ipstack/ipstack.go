@@ -147,6 +147,11 @@ func (st *Stack) ListenTCP(port uint16) (net.Listener, error) {
 	return gonet.ListenTCP(st.s, tcpip.FullAddress{NIC: nicID, Port: port}, ipv4.ProtocolNumber)
 }
 
+// DialTCP connects to remote from a free port.
+func (st *Stack) DialTCP(ctx context.Context, remote netip.AddrPort) (net.Conn, error) {
+	return gonet.DialContextTCP(ctx, st.s, fullAddr(remote), ipv4.ProtocolNumber)
+}
+
 // UDPListener receives datagrams on a port, sent to the stack's address or
 // to a broadcast address.
 type UDPListener struct {

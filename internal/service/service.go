@@ -14,13 +14,14 @@ const (
 	TFTP      = "tftp"
 	Bootparam = "bootparam"
 	NFS       = "nfs"
+	NIS       = "nis"
 	DHCP      = "dhcp"
 	SMB       = "smb"
 	RBCS      = "rbcs"
 )
 
 // All lists every known service name in a stable order.
-var All = []string{RARP, RMP, MOP, ND, RPL, TFTP, Bootparam, NFS, DHCP, SMB, RBCS}
+var All = []string{RARP, RMP, MOP, ND, RPL, TFTP, Bootparam, NFS, NIS, DHCP, SMB, RBCS}
 
 // Known reports whether name is a service name bootd understands.
 func Known(name string) bool { return slices.Contains(All, name) }

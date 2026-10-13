@@ -1,13 +1,18 @@
 package oncrpc
 
 import (
+	"bufio"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net"
 	"net/netip"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/rpajarola/gobootd/internal/ipstack"
 )
@@ -39,9 +44,10 @@ const (
 	systemErr    = 5
 )
 
-// Well known ports. Every program is served on both; the portmapper
-// announces NFSPort for NFS, which many clients assume anyway, and
-// PortmapPort for everything else.
+// Well known ports. Every program is served over UDP on both; the
+// portmapper announces NFSPort for NFS, which many clients assume anyway,
+// and PortmapPort for everything else. Programs that ask for it are also
+// served over TCP on PortmapPort.
 const (
 	PortmapPort = 111
 	NFSPort     = 2049
@@ -49,7 +55,13 @@ const (
 	PortmapProg = 100000
 	NFSProg     = 100003
 
+	protoTCP = 6
 	protoUDP = 17
+
+	// maxRecord limits a call received over TCP.
+	maxRecord = 1 << 20
+	// tcpIdle is how long a TCP connection may stay idle.
+	tcpIdle = 5 * time.Minute
 )
 
 // Errors a procedure returns instead of results.
@@ -83,6 +95,8 @@ type Call struct {
 	Broadcast bool
 	// Indirect is set if the call came through CALLIT.
 	Indirect bool
+	// TCP is set if the call came over TCP.
+	TCP bool
 }
 
 // Proc is a procedure. It returns the encoded results, or ErrDrop,
@@ -94,6 +108,8 @@ type Program struct {
 	Prog, Vers uint32
 	// Procs are the procedures; procedure 0 (NULL) is provided.
 	Procs map[uint32]Proc
+	// TCP announces the program over TCP as well as UDP.
+	TCP bool
 }
 
 // Dispatcher serves the RPC programs registered on one IP stack.
@@ -157,6 +173,18 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 			}
 		})
 	}
+	tl, err := d.st.ListenTCP(PortmapPort)
+	if err != nil {
+		cancel(nil)
+		return err
+	}
+	stop := context.AfterFunc(ctx, func() { tl.Close() })
+	defer stop()
+	wg.Go(func() {
+		if err := d.serveTCP(ctx, tl, &wg); err != nil && ctx.Err() == nil {
+			cancel(err)
+		}
+	})
 	<-ctx.Done()
 	if err := context.Cause(ctx); !errors.Is(err, context.Canceled) {
 		return err
@@ -182,14 +210,102 @@ func (d *Dispatcher) serve(ctx context.Context, l *ipstack.UDPListener, wg *sync
 	}
 }
 
+func (d *Dispatcher) serveTCP(ctx context.Context, l net.Listener, wg *sync.WaitGroup) error {
+	defer l.Close()
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return err
+		}
+		wg.Go(func() { d.serveConn(ctx, conn) })
+	}
+}
+
+// serveConn serves calls on a TCP connection, one record each (RFC 5531
+// section 11), until the client closes it, it is idle too long or ctx is
+// done.
+func (d *Dispatcher) serveConn(ctx context.Context, conn net.Conn) {
+	defer conn.Close()
+	stop := context.AfterFunc(ctx, func() { conn.Close() })
+	defer stop()
+	ta, _ := conn.RemoteAddr().(*net.TCPAddr)
+	if ta == nil {
+		return
+	}
+	from := ta.AddrPort()
+	from = netip.AddrPortFrom(from.Addr().Unmap(), from.Port())
+	r := bufio.NewReader(conn)
+	for {
+		conn.SetReadDeadline(time.Now().Add(tcpIdle))
+		msg, err := ReadRecord(r)
+		if err != nil {
+			if !errors.Is(err, io.EOF) && ctx.Err() == nil {
+				d.log.Debug("rpc connection closed", "client", from.String(), "err", err)
+			}
+			return
+		}
+		reply := d.handleTCP(msg, from)
+		if reply == nil {
+			continue
+		}
+		if err := WriteRecord(conn, reply); err != nil {
+			return
+		}
+	}
+}
+
+// ReadRecord reads one record-marked message.
+func ReadRecord(r io.Reader) ([]byte, error) {
+	var msg []byte
+	for {
+		var h [4]byte
+		if _, err := io.ReadFull(r, h[:]); err != nil {
+			if len(msg) > 0 && errors.Is(err, io.EOF) {
+				err = io.ErrUnexpectedEOF
+			}
+			return nil, err
+		}
+		v := binary.BigEndian.Uint32(h[:])
+		n := int(v & 0x7fffffff)
+		if len(msg)+n > maxRecord {
+			return nil, fmt.Errorf("record larger than %d bytes", maxRecord)
+		}
+		msg = append(msg, make([]byte, n)...)
+		if _, err := io.ReadFull(r, msg[len(msg)-n:]); err != nil {
+			return nil, io.ErrUnexpectedEOF
+		}
+		if v&0x80000000 != 0 {
+			return msg, nil
+		}
+	}
+}
+
+// WriteRecord writes msg as one record.
+func WriteRecord(w io.Writer, msg []byte) error {
+	b := binary.BigEndian.AppendUint32(make([]byte, 0, 4+len(msg)), 0x80000000|uint32(len(msg)))
+	_, err := w.Write(append(b, msg...))
+	return err
+}
+
 // handle decodes a call message and returns the reply, or nil.
 func (d *Dispatcher) handle(msg []byte, from netip.AddrPort, broadcast bool) []byte {
+	return d.handleCall(msg, from, broadcast, false)
+}
+
+func (d *Dispatcher) handleTCP(msg []byte, from netip.AddrPort) []byte {
+	return d.handleCall(msg, from, false, true)
+}
+
+func (d *Dispatcher) handleCall(msg []byte, from netip.AddrPort, broadcast, tcp bool) []byte {
 	dec := NewDecoder(msg)
 	xid, mtype := dec.Uint32(), dec.Uint32()
 	if dec.Err() != nil || mtype != msgCall {
 		return nil
 	}
-	c := &Call{XID: xid, From: from, Broadcast: broadcast}
+	c := &Call{XID: xid, From: from, Broadcast: broadcast, TCP: tcp}
 	vers := dec.Uint32()
 	c.Prog, c.Vers, c.Proc = dec.Uint32(), dec.Uint32(), dec.Uint32()
 	credFlavor, cred := dec.Uint32(), dec.Opaque(400)
@@ -311,29 +427,42 @@ func (d *Dispatcher) getport(c *Call) ([]byte, error) {
 	// MOUNT v3 to v1; given port 0 it fails instead.
 	var port uint16
 	d.mu.Lock()
-	if len(d.progs[prog]) > 0 && prot == protoUDP {
-		port = Port(prog)
+	for _, p := range d.progs[prog] {
+		switch {
+		case prot == protoUDP:
+			port = Port(prog)
+		case prot == protoTCP && p.TCP:
+			port = PortmapPort
+		}
 	}
 	d.mu.Unlock()
 	return (&Encoder{}).Uint32(uint32(port)).Bytes(), nil
 }
 
 func (d *Dispatcher) dump(c *Call) ([]byte, error) {
-	type mapping struct{ prog, vers uint32 }
+	type mapping struct{ prog, vers, prot uint32 }
 	var ms []mapping
 	d.mu.Lock()
 	for prog, vs := range d.progs {
-		for vers := range vs {
-			ms = append(ms, mapping{prog, vers})
+		for vers, p := range vs {
+			ms = append(ms, mapping{prog, vers, protoUDP})
+			if p.TCP {
+				ms = append(ms, mapping{prog, vers, protoTCP})
+			}
 		}
 	}
 	d.mu.Unlock()
 	sort.Slice(ms, func(i, j int) bool {
-		return ms[i].prog < ms[j].prog || ms[i].prog == ms[j].prog && ms[i].vers < ms[j].vers
+		a, b := ms[i], ms[j]
+		return a.prog < b.prog || a.prog == b.prog && (a.vers < b.vers || a.vers == b.vers && a.prot > b.prot)
 	})
 	e := &Encoder{}
 	for _, m := range ms {
-		e.Bool(true).Uint32(m.prog).Uint32(m.vers).Uint32(protoUDP).Uint32(uint32(Port(m.prog)))
+		port := Port(m.prog)
+		if m.prot == protoTCP {
+			port = PortmapPort
+		}
+		e.Bool(true).Uint32(m.prog).Uint32(m.vers).Uint32(m.prot).Uint32(uint32(port))
 	}
 	return e.Bool(false).Bytes(), nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"time"
 
@@ -108,4 +109,27 @@ func (c *Client) Call(ctx context.Context, to netip.AddrPort, prog, vers, proc u
 		}
 	}
 	return nil, netip.AddrPort{}, errors.New("rpc: no reply")
+}
+
+// TCPClient makes calls over a TCP connection.
+type TCPClient struct {
+	Conn net.Conn
+	xid  uint32
+}
+
+// Call calls proc and returns the results.
+func (c *TCPClient) Call(prog, vers, proc uint32, args []byte) (*Decoder, error) {
+	c.xid++
+	if err := WriteRecord(c.Conn, EncodeCall(c.xid, prog, vers, proc, nil, args)); err != nil {
+		return nil, err
+	}
+	for {
+		msg, err := ReadRecord(c.Conn)
+		if err != nil {
+			return nil, err
+		}
+		if xid, res, err := DecodeReply(msg); xid == c.xid {
+			return res, err
+		}
+	}
 }

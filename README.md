@@ -23,6 +23,7 @@ clients, but not yet against real hardware.
 | TFTP | most | works (read only; blksize, tsize, timeout options) |
 | bootparam | SunOS, NetBSD, Solaris | works (with a built-in portmapper) |
 | NFSv2 | diskless root/swap | works (read only, MOUNT v1) |
+| NIS | SunOS and other YP clients | works (read only, no map transfer) |
 | RPL | IBM, 3Com DOS boot ROMs | planned |
 | MOP | DEC VAX, Alpha | planned |
 | BOOTP/DHCP | most | planned |
@@ -136,6 +137,17 @@ an IP address of bootd's own).
   owners, modes, devices and symlinks it lists. `export_path` sets the path
   clients see; NetBSD keeps `server:path` in 90 bytes. Writes are not
   supported yet.
+- **NIS** serves one domain to hosts that may use `nis`. The maps are made
+  from files in `/etc` format in the `maps` directory (`passwd`, `group`,
+  `hosts`, `ethers`, `netgroup`, `services`, `protocols`, `rpc`,
+  `networks`, `netmasks`, `aliases`, `publickey`, `bootparams`), keyed as
+  SunOS's `/var/yp/Makefile` keys them; a missing file means no map. The
+  configured hosts are added to `hosts.*` and `ethers.*`, and bootd's own
+  `server_name` with its address on each network. ypbind finds the server
+  by broadcast; `ypcat` works over TCP. bootparam announces the NIS domain
+  to hosts that may use `nis`, so SunOS sets its domain name and starts
+  ypbind. The files are read again on SIGHUP. `netgroup.byuser` and
+  `netgroup.byhost` are not made, and maps cannot be pushed to slaves.
 - **TFTP** identifies clients by IP address. A request for a path such as
   `/tftpboot/name` also matches a file named `name`. Requests sent to a
   broadcast address are answered too, but refusals of broadcast requests are

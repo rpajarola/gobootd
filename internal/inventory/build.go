@@ -20,7 +20,7 @@ import (
 // know the client's IP address.
 var (
 	needsMAC = []string{service.RARP, service.RMP, service.MOP, service.ND, service.RPL, service.DHCP, service.RBCS}
-	needsIP  = []string{service.RARP, service.ND, service.TFTP, service.Bootparam, service.NFS, service.SMB}
+	needsIP  = []string{service.RARP, service.ND, service.TFTP, service.Bootparam, service.NFS, service.NIS, service.SMB}
 )
 
 // Build creates an inventory from a parsed configuration, looking up missing

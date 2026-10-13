@@ -5,6 +5,7 @@ package netif
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/netip"
 
@@ -28,8 +29,9 @@ type Network struct {
 }
 
 // Open opens the transport described by cfg and returns the network. Call
-// Run to start it.
-func Open(cfg *config.Network) (*Network, error) {
+// Run to start it. log gets transport warnings, such as datagrams with the
+// wrong L2TPv3 cookie.
+func Open(cfg *config.Network, log *slog.Logger) (*Network, error) {
 	addr, err := netip.ParsePrefix(cfg.Address)
 	if err != nil {
 		return nil, err
@@ -70,7 +72,22 @@ func Open(cfg *config.Network) (*Network, error) {
 			}
 			peers = append(peers, ap)
 		}
-		if t, err = link.ListenUDP(local, peers); err != nil {
+		ucfg := link.UDPConfig{Peers: peers, KeepaliveMAC: mac, Log: log}
+		if l := cfg.L2TP; l != nil {
+			ucfg.L2TP = &link.L2TPv3{Session: 1, Counter: true}
+			if l.Session != nil {
+				ucfg.L2TP.Session = *l.Session
+			}
+			if l.Counter != nil {
+				ucfg.L2TP.Counter = *l.Counter
+			}
+			if l.Cookie != "" {
+				if ucfg.L2TP.Cookie, err = link.ParseCookie(l.Cookie); err != nil {
+					return nil, err
+				}
+			}
+		}
+		if t, err = link.ListenUDPConfig(local, ucfg); err != nil {
 			return nil, fmt.Errorf("network %s: %w", cfg.Name, err)
 		}
 	}

@@ -46,13 +46,21 @@ type InterfaceStats struct {
 	Errors    uint64
 }
 
+// Peers is the UDP side of a bridge: a *link.UDP or a *link.Group.
+type Peers interface {
+	link.Port
+	ReadFrameFrom(ctx context.Context) ([]byte, netip.AddrPort, error)
+	WriteFrameExcept(frame []byte, except netip.AddrPort) (int, error)
+	Knows(mac net.HardwareAddr) bool
+}
+
 // Bridge forwards frames between a LAN port and a UDP transport. Like a
 // learning switch, it only forwards unicast frames to the side the
 // destination was last seen on, so the UDP peers do not receive all of the
 // LAN's traffic.
 type Bridge struct {
 	LAN link.Port
-	UDP *link.UDP
+	UDP Peers
 	Log *slog.Logger
 
 	// StatsInterval is how often interface statistics are logged.

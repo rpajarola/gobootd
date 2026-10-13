@@ -39,6 +39,19 @@ network "lab" {
   peers   = ["127.0.0.1:4711"]   # bootbridge
   # mac   = "02:00:00:00:00:01"  # default: derived from the network name
 }
+# Across machines, use static L2TPv3: the cookie keeps out anyone who does
+# not know it (it is sent in clear, though). bootbridge needs no -peer:
+#   sudo bootbridge -i en0 -l2tp 0.0.0.0:1701 -cookie 0x0123456789abcdef
+# network "remote" {
+#   address = "192.168.1.251/24"
+#   udp     = "0.0.0.0:1701"
+#   peers   = ["192.168.1.10:1701"]
+#   l2tp {
+#     cookie  = "0x0123456789abcdef"   # 8 or 16 hex digits
+#     # session = 1
+#     # counter = true                 # L2-specific sublayer, as Linux and QEMU default to
+#   }
+# }
 # A network can also capture directly with libpcap, which needs root:
 # network "wired" {
 #   address = "192.168.2.250/24"

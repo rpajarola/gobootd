@@ -28,9 +28,20 @@ func freePort(t *testing.T) netip.AddrPort {
 }
 
 // TestEndToEnd runs the daemon on a UDP network, attaches a client the way
-// an emulator would (simh "attach xq udp:...", QEMU "-netdev dgram"), and
-// boots it with RARP and TFTP.
+// an emulator would (simh "attach xq udp:...", QEMU "-netdev dgram" or
+// "-netdev l2tpv3"), and boots it with RARP and TFTP.
 func TestEndToEnd(t *testing.T) {
+	t.Run("raw", func(t *testing.T) { testEndToEnd(t, "", nil) })
+	t.Run("l2tp", func(t *testing.T) {
+		testEndToEnd(t, `
+  l2tp {
+    session = 42
+    cookie  = "0x0123456789abcdef"
+  }`, &link.L2TPv3{Session: 42, Cookie: []byte{1, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef}, Counter: true})
+	})
+}
+
+func testEndToEnd(t *testing.T, l2tpConf string, l2tp *link.L2TPv3) {
 	dir := t.TempDir()
 	boot := bytes.Repeat([]byte("sparc"), 2000)
 	if err := os.WriteFile(filepath.Join(dir, "boot"), boot, 0o644); err != nil {
@@ -45,7 +56,7 @@ resolve {
 log { file = "bootd.log" }
 network "lab" {
   address = "192.168.7.1/24"
-  udp     = "%s"
+  udp     = "%s"%s
 }
 service "rarp" {}
 service "tftp" {}
@@ -54,7 +65,7 @@ host "kali" {
   ip  = "192.168.7.5"
   file "boot" { name = "*" }
 }
-`, bootd)
+`, bootd, l2tpConf)
 	path := filepath.Join(dir, "bootd.hcl")
 	if err := os.WriteFile(path, []byte(conf), 0o644); err != nil {
 		t.Fatal(err)
@@ -75,7 +86,7 @@ host "kali" {
 	}()
 
 	// The client: a UDP transport pointed at bootd.
-	tr, err := link.ListenUDP(netip.MustParseAddrPort("127.0.0.1:0"), []netip.AddrPort{bootd})
+	tr, err := link.ListenUDPConfig(netip.MustParseAddrPort("127.0.0.1:0"), link.UDPConfig{Peers: []netip.AddrPort{bootd}, L2TP: l2tp})
 	if err != nil {
 		t.Fatal(err)
 	}

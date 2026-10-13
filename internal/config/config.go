@@ -16,6 +16,8 @@ import (
 	"github.com/hashicorp/hcl/v2/gohcl"
 	"github.com/hashicorp/hcl/v2/hclparse"
 
+	"github.com/rpajarola/gobootd/internal/link"
+
 	"github.com/rpajarola/gobootd/internal/service"
 )
 
@@ -79,6 +81,8 @@ type Network struct {
 	// Peers are UDP addresses frames are always sent to. Other peers
 	// are learned when they send.
 	Peers []string `hcl:"peers,optional"`
+	// L2TP wraps the frames sent over udp in static L2TPv3.
+	L2TP *L2TP `hcl:"l2tp,block"`
 	// Pcap is a network interface to capture on directly. This needs
 	// privileges.
 	Pcap string `hcl:"pcap,optional"`
@@ -88,6 +92,22 @@ type Network struct {
 	MACRange     hcl.Range `hcl:"mac,attr_range"`
 	UDPRange     hcl.Range `hcl:"udp,attr_range"`
 	PeersRange   hcl.Range `hcl:"peers,attr_range"`
+}
+
+// L2TP are the settings of static L2TPv3 (see link.L2TPv3).
+type L2TP struct {
+	// Session is the session ID in both directions. Defaults to 1.
+	Session *uint32 `hcl:"session,optional"`
+	// Cookie is 8 or 16 hex digits, the same in both directions. Peers
+	// without it are ignored.
+	Cookie string `hcl:"cookie,optional"`
+	// Counter adds the L2-specific sublayer with a sequence number.
+	// Defaults to true, as Linux and QEMU do.
+	Counter *bool `hcl:"counter,optional"`
+
+	DefRange     hcl.Range `hcl:",def_range"`
+	SessionRange hcl.Range `hcl:"session,attr_range"`
+	CookieRange  hcl.Range `hcl:"cookie,attr_range"`
 }
 
 // MACInterface is the MAC setting that uses the interface's own address.
@@ -388,6 +408,19 @@ func (n *Network) validate() hcl.Diagnostics {
 		if _, err := netip.ParseAddrPort(n.UDP); err != nil {
 			diags = append(diags, errorf(n.UDPRange, "Invalid UDP address",
 				"%q is not an IP address and port, like \"127.0.0.1:4711\".", n.UDP))
+		}
+	}
+	if l := n.L2TP; l != nil {
+		if n.Pcap != "" {
+			diags = append(diags, errorf(l.DefRange, "L2TP needs udp", "Only udp networks can use L2TPv3."))
+		}
+		if l.Session != nil && *l.Session == 0 {
+			diags = append(diags, errorf(l.SessionRange, "Invalid L2TP session", "Session 0 is reserved for control messages."))
+		}
+		if l.Cookie != "" {
+			if _, err := link.ParseCookie(l.Cookie); err != nil {
+				diags = append(diags, errorf(l.CookieRange, "Invalid L2TP cookie", "%v.", err))
+			}
 		}
 	}
 	if n.Pcap == "" && len(n.Peers) > 0 {

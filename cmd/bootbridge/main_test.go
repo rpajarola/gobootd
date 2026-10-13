@@ -124,3 +124,21 @@ func TestKeyboardInterfaceCommands(t *testing.T) {
 	}
 }
 
+
+func TestL2TPFlags(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"-cookie", "0123456789abcdef"}, "need -l2tp"},
+		{[]string{"-l2tp-peer", "10.0.0.1:1701"}, "need -l2tp"},
+		{[]string{"-l2tp", "0.0.0.0:1701", "-cookie", "secret"}, "not 8 or 16 hex digits"},
+		{[]string{"-l2tp", "0.0.0.0:1701", "-session", "0"}, "-session must be"},
+		{[]string{"-listen", ""}, "need -listen or -l2tp"},
+	} {
+		code, errs := runCmd(append([]string{"-i", "eth0"}, tc.args...)...)
+		if code != 2 || !strings.Contains(errs, tc.want) {
+			t.Errorf("%v: code %d, %q", tc.args, code, errs)
+		}
+	}
+}

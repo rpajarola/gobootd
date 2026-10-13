@@ -105,6 +105,22 @@ header. This is the format of the HECnet bridge, which simh and QEMU speak:
 bootd learns peers that send to it, so several emulators can talk to one
 bootd without a bridge.
 
+Instead of raw frames, a network can use static L2TPv3 (RFC 3931), which
+Linux and QEMU also speak. Its cookie keeps out anyone who does not know
+it, so bootd and bootbridge can run on different machines:
+
+```hcl
+network "lab" {
+  address = "192.168.1.250/24"
+  udp     = "0.0.0.0:1701"
+  peers   = ["192.168.1.10:1701"]   # sudo bootbridge -i en0 -l2tp 0.0.0.0:1701 -cookie 0x0123456789abcdef
+  l2tp { cookie = "0x0123456789abcdef" }
+}
+```
+
+bootd sends its fixed peers a keepalive every minute, so bootbridge needs
+no `-peer` for it. See [bootbridge](cmd/bootbridge/README.md) for details.
+
 A network can also capture directly with `pcap = "en0"`, which needs
 privileges. On Wi-Fi, where the access point drops frames from unknown MAC
 addresses, add `mac = "interface"` to use the interface's own address (with

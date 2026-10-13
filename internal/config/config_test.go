@@ -54,6 +54,9 @@ func TestParseErrors(t *testing.T) {
 		{"writable bootfile", "host \"a\" {\n  disk \"d\" {\n    path = \"x\"\n    mode = \"bootfile\"\n    writable = true\n  }\n}", "cannot be writable", 2},
 		{"unknown attribute", "host \"a\" {\n  macaddr = \"1\"\n}", "Unsupported argument", 2},
 		{"syntax", "host \"a\" {", "Unclosed configuration block", 1},
+		{"bad l2tp cookie", "network \"n\" {\n  address = \"10.0.0.1/24\"\n  udp = \"127.0.0.1:1701\"\n  l2tp {\n    cookie = \"secret\"\n  }\n}", "not 8 or 16 hex digits", 5},
+		{"l2tp session 0", "network \"n\" {\n  address = \"10.0.0.1/24\"\n  udp = \"127.0.0.1:1701\"\n  l2tp {\n    session = 0\n  }\n}", "reserved", 5},
+		{"l2tp with pcap", "network \"n\" {\n  address = \"10.0.0.1/24\"\n  pcap = \"en0\"\n  l2tp {}\n}", "Only udp networks", 4},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, _, diags := Parse([]byte(tc.src), "test.hcl")

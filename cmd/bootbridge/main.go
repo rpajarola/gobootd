@@ -1,9 +1,11 @@
 // Command bootbridge connects a network interface to bootd, simh or QEMU
-// over UDP, one Ethernet frame per datagram (the HECnet bridge format).
+// over UDP, one Ethernet frame per datagram: raw (the HECnet bridge
+// format), or with static L2TPv3, whose cookie keeps out peers that do not
+// know it.
 //
 // It is the only part that needs capture privileges; bootd itself runs
 // unprivileged. Peers that send to bootbridge are learned; peers given with
-// -peer always receive frames.
+// -peer or -l2tp-peer always receive frames.
 package main
 
 import (
@@ -81,69 +83,141 @@ func mainCmdWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 	}
 	fs := flag.NewFlagSet("bootbridge", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	iface := fs.String("i", "", "network interface to bridge (required)")
-	listen := fs.String("listen", "127.0.0.1:4711", "UDP address to exchange frames on")
+	var o options
+	fs.StringVar(&o.iface, "i", "", "network interface to bridge (required)")
+	fs.StringVar(&o.listen, "listen", "127.0.0.1:4711", "UDP address to exchange raw frames on (\"\" for none)")
+	fs.Var(&o.peers, "peer", "raw UDP peer that always receives frames (repeatable)")
+	fs.StringVar(&o.l2tp, "l2tp", "", "UDP address to exchange L2TPv3 frames on")
+	fs.Var(&o.l2tpPeers, "l2tp-peer", "L2TPv3 peer that always receives frames (repeatable)")
+	session := fs.Uint("session", 1, "L2TPv3 session ID")
+	cookie := fs.String("cookie", "", "L2TPv3 cookie, 8 or 16 hex digits")
+	counter := fs.Bool("counter", true, "L2TPv3 L2-specific sublayer with a sequence number")
 	stats := fs.Duration("stats", 30*time.Second, "interval to log interface statistics (0 to disable)")
 	verbose := fs.Bool("v", false, "log every forwarding error")
-	printPkts := fs.Bool("print", false, "print packets as they pass through the bridge")
-	fs.BoolVar(printPkts, "p", false, "alias for -print")
-	dumpPkts := fs.Bool("X", false, "dump very verbose packet info (hex/ASCII, like tcpdump -X)")
-	fs.BoolVar(dumpPkts, "dump", false, "alias for -X")
-	printIface := fs.String("print-iface", "all", "interface to print packets for (udp, lan, all, or interface name)")
-	fs.StringVar(printIface, "print-interface", "all", "alias for -print-iface")
-	var peers peerList
-	fs.Var(&peers, "peer", "UDP peer that always receives frames (repeatable)")
+	fs.BoolVar(&o.printPkts, "print", false, "print packets as they pass through the bridge")
+	fs.BoolVar(&o.printPkts, "p", false, "alias for -print")
+	fs.BoolVar(&o.dumpPkts, "X", false, "dump very verbose packet info (hex/ASCII, like tcpdump -X)")
+	fs.BoolVar(&o.dumpPkts, "dump", false, "alias for -X")
+	fs.StringVar(&o.printIface, "print-iface", "all", "interface to print packets for (udp, lan, all, or interface name)")
+	fs.StringVar(&o.printIface, "print-interface", "all", "alias for -print-iface")
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "usage: bootbridge -i interface [-listen addr:port] [-peer addr:port]... [-stats duration] [-v] [-print] [-X] [-print-iface name]\n")
+		fmt.Fprintf(stderr, "usage: bootbridge -i interface [-listen addr:port] [-peer addr:port]... [-l2tp addr:port [-l2tp-peer addr:port]... [-session id] [-cookie hex] [-counter=false]] [-stats duration] [-v] [-print] [-X] [-print-iface name]\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if *iface == "" || fs.NArg() != 0 {
+	if o.iface == "" || fs.NArg() != 0 {
 		fs.Usage()
 		return 2
 	}
-	if *dumpPkts {
-		*printPkts = true
+	if o.l2tp != "" {
+		if *session == 0 || *session > 0xffffffff {
+			fmt.Fprintf(stderr, "bootbridge: -session must be 1 to 4294967295\n")
+			return 2
+		}
+		o.l2tpCfg = &link.L2TPv3{Session: uint32(*session), Counter: *counter}
+		if *cookie != "" {
+			c, err := link.ParseCookie(*cookie)
+			if err != nil {
+				fmt.Fprintf(stderr, "bootbridge: -cookie: %v\n", err)
+				return 2
+			}
+			o.l2tpCfg.Cookie = c
+		}
+	} else if *cookie != "" || len(o.l2tpPeers) > 0 {
+		fmt.Fprintf(stderr, "bootbridge: -cookie and -l2tp-peer need -l2tp\n")
+		return 2
 	}
-	if *printIface != "" && *printIface != "all" {
-		*printPkts = true
+	if o.listen == "" && o.l2tp == "" {
+		fmt.Fprintf(stderr, "bootbridge: need -listen or -l2tp\n")
+		return 2
 	}
+	if o.dumpPkts {
+		o.printPkts = true
+	}
+	if o.printIface != "" && o.printIface != "all" {
+		o.printPkts = true
+	}
+	o.stats = *stats
 	lvl := slog.LevelInfo
 	if *verbose {
 		lvl = slog.LevelDebug
 	}
 	log := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: lvl}))
-	if err := run(*iface, *listen, peers, *stats, *printPkts, *dumpPkts, *printIface, stdin, stdout, log); err != nil {
+	if err := run(o, stdin, stdout, log); err != nil {
 		fmt.Fprintf(stderr, "bootbridge: %v\n", err)
 		return 1
 	}
 	return 0
 }
 
-func run(iface, listen string, peers []netip.AddrPort, statsInterval time.Duration, printPkts, dumpPkts bool, printIface string, stdin io.Reader, stdout io.Writer, log *slog.Logger) error {
-	addr, err := netip.ParseAddrPort(listen)
-	if err != nil {
-		return fmt.Errorf("-listen: %w", err)
+type options struct {
+	iface            string
+	listen, l2tp     string
+	peers, l2tpPeers peerList
+	l2tpCfg          *link.L2TPv3
+	stats            time.Duration
+	printPkts        bool
+	dumpPkts         bool
+	printIface       string
+}
+
+func run(o options, stdin io.Reader, stdout io.Writer, log *slog.Logger) error {
+	var raw, l2tp netip.AddrPort
+	var err error
+	if o.listen != "" {
+		if raw, err = netip.ParseAddrPort(o.listen); err != nil {
+			return fmt.Errorf("-listen: %w", err)
+		}
 	}
-	lan, err := link.OpenPcap(iface, nil)
-	if err != nil {
-		return fmt.Errorf("%s: %w", iface, err)
+	if o.l2tp != "" {
+		if l2tp, err = netip.ParseAddrPort(o.l2tp); err != nil {
+			return fmt.Errorf("-l2tp: %w", err)
+		}
 	}
-	udp, err := link.ListenUDP(addr, peers)
+	lan, err := link.OpenPcap(o.iface, nil)
 	if err != nil {
-		lan.Close()
-		return err
+		return fmt.Errorf("%s: %w", o.iface, err)
 	}
 	defer lan.Close()
-	defer udp.Close()
-	if !addr.Addr().IsLoopback() {
-		log.Warn("listening on a non-loopback address: anyone who can send UDP to it can put frames on the LAN", "listen", addr.String())
+	mac := lan.Interface().MAC
+	var members []*link.UDP
+	defer func() {
+		for _, u := range members {
+			u.Close()
+		}
+	}()
+	if raw.IsValid() {
+		u, err := link.ListenUDPConfig(raw, link.UDPConfig{Peers: o.peers, KeepaliveMAC: mac, Log: log})
+		if err != nil {
+			return err
+		}
+		members = append(members, u)
+		if !raw.Addr().IsLoopback() {
+			log.Warn("raw UDP on a non-loopback address: anyone who can send UDP to it can put frames on the LAN; consider -l2tp with -cookie", "listen", raw.String())
+		}
+		log.Info("raw UDP", "listen", u.Addr().String(), "peers", o.peers)
 	}
-	log.Info("bridging", "interface", iface, "mac", lan.Interface().MAC.String(), "listen", udp.Addr().String(), "peers", peers)
+	if l2tp.IsValid() {
+		u, err := link.ListenUDPConfig(l2tp, link.UDPConfig{Peers: o.l2tpPeers, L2TP: o.l2tpCfg, KeepaliveMAC: mac, Log: log})
+		if err != nil {
+			return err
+		}
+		members = append(members, u)
+		if len(o.l2tpCfg.Cookie) == 0 && !l2tp.Addr().IsLoopback() {
+			log.Warn("L2TPv3 without a cookie on a non-loopback address: anyone who can send UDP to it can put frames on the LAN", "l2tp", l2tp.String())
+		}
+		log.Info("L2TPv3", "listen", u.Addr().String(), "peers", o.l2tpPeers, "session", o.l2tpCfg.Session, "cookie", len(o.l2tpCfg.Cookie) > 0, "counter", o.l2tpCfg.Counter)
+	}
+	var udp bridge.Peers = members[0]
+	if len(members) > 1 {
+		udp = link.NewGroup(members...)
+	}
+	log.Info("bridging", "interface", o.iface, "mac", mac.String())
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	statsInterval := o.stats
 	if statsInterval <= 0 {
 		statsInterval = -1
 	}
@@ -152,9 +226,9 @@ func run(iface, listen string, peers []netip.AddrPort, statsInterval time.Durati
 		UDP:            udp,
 		Log:            log,
 		StatsInterval:  statsInterval,
-		PrintPackets:   printPkts,
-		DumpPackets:    dumpPkts,
-		PrintInterface: printIface,
+		PrintPackets:   o.printPkts,
+		DumpPackets:    o.dumpPkts,
+		PrintInterface: o.printIface,
 		PacketWriter:   stdout,
 	}
 	if stdin != nil {

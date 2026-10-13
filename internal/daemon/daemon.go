@@ -154,7 +154,7 @@ func Run(ctx context.Context, path string, reload <-chan struct{}, stderr io.Wri
 	defer wg.Wait()
 	nets := map[string]*netif.Network{}
 	for _, c := range l.Config.Networks {
-		n, err := OpenNetwork(c)
+		n, err := OpenNetwork(c, log.With("network", c.Name))
 		if err != nil {
 			cancel(nil)
 			return err

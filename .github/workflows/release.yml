@@ -36,7 +36,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libpcap-dev
-          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.48.0
+          case "$(uname -m)" in
+            x86_64) arch=x86_64 ;;
+            aarch64) arch=arm64 ;;
+          esac
+          curl -fsSL "https://github.com/goreleaser/nfpm/releases/download/v2.48.0/nfpm_2.48.0_Linux_$arch.tar.gz" |
+            sudo tar xzf - -C /usr/local/bin nfpm
       - name: Build
         run: VERSION="${TAG#v}" packaging/build-deb.sh
       - name: Attach to the release

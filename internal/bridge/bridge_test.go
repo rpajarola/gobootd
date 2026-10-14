@@ -323,11 +323,11 @@ func TestBridgeHostIPAndPeerPortVariation(t *testing.T) {
 	arpPkt := make([]byte, 28)
 	binary.BigEndian.PutUint16(arpPkt[0:2], 1)             // HW Ethernet
 	binary.BigEndian.PutUint16(arpPkt[2:4], link.TypeIPv4) // Proto IPv4
-	arpPkt[4] = 6                                         // HW len
-	arpPkt[5] = 4                                         // Proto len
+	arpPkt[4] = 6                                          // HW len
+	arpPkt[5] = 4                                          // Proto len
 	binary.BigEndian.PutUint16(arpPkt[6:8], 1)             // Op Request
-	copy(arpPkt[8:14], mSun)                              // Sender MAC
-	copy(arpPkt[14:18], []byte{192, 168, 1, 55})          // Sender IP
+	copy(arpPkt[8:14], mSun)                               // Sender MAC
+	copy(arpPkt[14:18], []byte{192, 168, 1, 55})           // Sender IP
 	sun.WriteFrame(link.Build(link.Broadcast, mSun, link.TypeARP, arpPkt))
 	read(peerA)
 
@@ -780,7 +780,3 @@ func TestBridgePrintInterfaceFilter(t *testing.T) {
 		t.Errorf("expected LAN packet when filter is %s, got:\n%s", b.LANName(), out5)
 	}
 }
-
-
-
-

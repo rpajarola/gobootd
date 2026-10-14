@@ -32,13 +32,17 @@ clients, but not yet against real hardware.
 
 ## Install
 
-Packages for Debian and Ubuntu (an apt repository), macOS (Homebrew or an
-installer package) are described in [packaging](packaging/README.md):
+Packages are attached to each [release](https://github.com/rpajarola/gobootd/releases),
+and available from:
 
-```
-brew install rpajarola/tap/gobootd      # macOS
-sudo apt install gobootd                # after adding the apt repository
-```
+- **Debian and Ubuntu** (amd64, arm64): the [apt repository](https://rpajarola.github.io/apt/),
+  then `sudo apt install gobootd`
+- **macOS**: the [Homebrew tap](https://github.com/rpajarola/homebrew-tap),
+  `brew install rpajarola/tap/gobootd`, or the installer package from a
+  release, which needs no Homebrew
+
+[packaging](packaging/README.md) describes what is installed, how to set
+up the services, and how the packages are built.
 
 Or build it with Go: `go install github.com/rpajarola/gobootd/cmd/...@latest`
 (bootd and bootbridge need libpcap's headers).

@@ -30,6 +30,19 @@ clients, but not yet against real hardware.
 | SMB1 | DOS clients after RPL | planned |
 | RBCS | 3Com 3Station | needs reverse engineering |
 
+## Install
+
+Packages for Debian and Ubuntu (an apt repository), macOS (Homebrew or an
+installer package) are described in [packaging](packaging/README.md):
+
+```
+brew install rpajarola/tap/gobootd      # macOS
+sudo apt install gobootd                # after adding the apt repository
+```
+
+Or build it with Go: `go install github.com/rpajarola/gobootd/cmd/...@latest`
+(bootd and bootbridge need libpcap's headers).
+
 ## Configuration
 
 The configuration is [HCL](https://github.com/hashicorp/hcl). A short

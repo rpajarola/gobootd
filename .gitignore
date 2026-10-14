@@ -6,3 +6,4 @@ main
 cmd/bootbridge/bootbridge
 
 .*.swp
+/dist/

@@ -1,0 +1,31 @@
+[Unit]
+Description=gobootd bridge between a network interface and UDP
+Documentation=https://github.com/rpajarola/gobootd/tree/main/cmd/bootbridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bootd
+Group=bootd
+ExecStart=/usr/bin/bootbridge -c /etc/bootbridge.hcl
+StandardInput=null
+Restart=on-failure
+RestartSec=5s
+
+# Capturing and sending on the interface is all bootbridge may do.
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_PACKET AF_NETLINK
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

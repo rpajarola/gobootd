@@ -1,0 +1,72 @@
+name: gobootd
+arch: "${ARCH}"
+platform: linux
+version: "${VERSION}"
+section: net
+priority: optional
+maintainer: "Rico Pajarola <rp@servium.ch>"
+homepage: "https://github.com/rpajarola/gobootd"
+license: GPL-3.0-only
+description: |
+  Boot server for old and unusual machines.
+  Serves RARP, RMP, Sun ND, TFTP, bootparam, NFSv2 and NIS from one
+  configuration file, to real machines through bootbridge and to simh,
+  QEMU, TME and GXemul over UDP or L2TPv3.
+
+depends:
+  - adduser
+  - libpcap0.8t64 | libpcap0.8
+
+contents:
+  # nfpm's ${VAR} expansion doesn't reach contents[].src, so build-deb.sh
+  # builds into this fixed path.
+  - src: dist/bin/bootd
+    dst: /usr/bin/bootd
+    file_info:
+      mode: 0755
+  - src: dist/bin/bootbridge
+    dst: /usr/bin/bootbridge
+    file_info:
+      mode: 0755
+
+  - src: packaging/systemd/bootd.service
+    dst: /lib/systemd/system/bootd.service
+  - src: packaging/systemd/bootbridge.service
+    dst: /lib/systemd/system/bootbridge.service
+
+  - src: packaging/etc/bootd.hcl
+    dst: /etc/bootd.hcl
+    type: config|noreplace
+    file_info:
+      mode: 0640
+      owner: root
+      group: bootd
+  - src: packaging/etc/bootbridge.hcl
+    dst: /etc/bootbridge.hcl
+    type: config|noreplace
+    file_info:
+      mode: 0640
+      owner: root
+      group: bootd
+
+  - src: etc/bootd.hcl
+    dst: /usr/share/doc/gobootd/examples/bootd.hcl
+  - src: etc/bootbridge.hcl
+    dst: /usr/share/doc/gobootd/examples/bootbridge.hcl
+  - src: README.md
+    dst: /usr/share/doc/gobootd/README.md
+  - src: cmd/bootbridge/README.md
+    dst: /usr/share/doc/gobootd/bootbridge.md
+  - src: LICENSE
+    dst: /usr/share/doc/gobootd/copyright
+
+  - dst: /var/lib/bootd
+    type: dir
+    file_info:
+      mode: 0755
+
+scripts:
+  preinstall: packaging/scripts/preinstall.sh
+  postinstall: packaging/scripts/postinstall.sh
+  preremove: packaging/scripts/preremove.sh
+  postremove: packaging/scripts/postremove.sh

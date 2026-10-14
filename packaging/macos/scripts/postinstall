@@ -1,0 +1,21 @@
+#!/bin/sh
+# Runs after the package is installed. Configuration files are created only
+# if missing, so upgrades keep them. The launch daemons are installed but
+# not loaded; a daemon that is already loaded is restarted.
+set -e
+
+share=/usr/local/share/gobootd
+mkdir -p /usr/local/etc /usr/local/var/bootd /usr/local/var/log
+if [ ! -e /usr/local/etc/bootd.hcl ]; then
+  install -m 0640 -o root -g nobody "$share/defaults/bootd.hcl" /usr/local/etc/bootd.hcl
+fi
+if [ ! -e /usr/local/etc/bootbridge.hcl ]; then
+  install -m 0600 -o root -g wheel "$share/defaults/bootbridge.hcl" /usr/local/etc/bootbridge.hcl
+fi
+
+for d in bootd bootbridge; do
+  if launchctl print "system/io.github.rpajarola.$d" >/dev/null 2>&1; then
+    launchctl kickstart -k "system/io.github.rpajarola.$d" || true
+  fi
+done
+exit 0

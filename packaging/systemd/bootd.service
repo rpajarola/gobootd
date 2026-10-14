@@ -1,0 +1,34 @@
+[Unit]
+Description=gobootd boot server
+Documentation=https://github.com/rpajarola/gobootd
+After=network-online.target bootbridge.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bootd
+Group=bootd
+ExecStartPre=/usr/bin/bootd check -q -c /etc/bootd.hcl
+ExecStart=/usr/bin/bootd run -c /etc/bootd.hcl
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5s
+LogsDirectory=bootd
+
+# bootd talks to its clients over UDP with its own IP stack, so it needs no
+# privileges. A network block with pcap = "..." needs these as well:
+#AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_PACKET AF_NETLINK
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

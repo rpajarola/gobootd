@@ -13,6 +13,7 @@ import (
 
 	"github.com/rpajarola/gobootd/internal/config"
 	"github.com/rpajarola/gobootd/internal/daemon"
+	"github.com/rpajarola/gobootd/internal/version"
 
 	// Protocols register themselves with the daemon.
 	_ "github.com/rpajarola/gobootd/internal/proto/bootparam"
@@ -30,6 +31,7 @@ const usage = `usage:
   bootd explain [-c config] <client> [service [file]]
                                                  show how a request from client would be handled;
                                                  client is a host name, MAC or IP address
+  bootd version                                  print the version
 `
 
 func main() {
@@ -74,6 +76,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return explain(*path, fs.Args(), stdout, stderr)
 	case "help":
 		fmt.Fprint(stdout, usage)
+		return 0
+	case "version":
+		fmt.Fprintf(stdout, "bootd %s\n", version.String())
 		return 0
 	}
 	fmt.Fprintf(stderr, "bootd: unknown command %q\n", cmd)

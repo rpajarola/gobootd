@@ -28,6 +28,7 @@ import (
 
 	"github.com/rpajarola/gobootd/internal/bridge"
 	"github.com/rpajarola/gobootd/internal/link"
+	"github.com/rpajarola/gobootd/internal/version"
 )
 
 type crlfWriter struct {
@@ -80,6 +81,7 @@ func mainCmdWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 	var f settings
 	var peers, l2tpPeers stringList
 	config := fs.String("c", "", "configuration file; flags given override it")
+	showVersion := fs.Bool("version", false, "print the version")
 	fs.StringVar(&f.iface, "i", "", "network interface to bridge (required)")
 	fs.StringVar(&f.listen, "listen", d.listen, "UDP address to exchange raw frames on (\"\" for none)")
 	fs.Var(&peers, "peer", "raw UDP peer that always receives frames (repeatable)")
@@ -102,6 +104,10 @@ func mainCmdWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	if *showVersion {
+		fmt.Fprintf(stdout, "bootbridge %s\n", version.String())
+		return 0
 	}
 	if fs.NArg() != 0 || len(args) == 0 {
 		fs.Usage()

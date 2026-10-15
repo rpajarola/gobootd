@@ -1,0 +1,479 @@
+.Dd October 14, 2026
+.Dt BOOTD.HCL 5
+.Os
+.Sh NAME
+.Nm bootd.hcl
+.Nd bootd configuration file
+.Sh DESCRIPTION
+.Xr bootd 8
+reads its configuration from one file in HCL, HashiCorp's configuration
+language: attributes are written
+.Ar name No = Ar value ,
+blocks
+.Ar type Qo Ar label Qc Brq ... ,
+strings are quoted, lists are written
+.Li [\&"a\&", \&"b\&"]
+and maps
+.Li { key = \&"value\&" } .
+Comments start with
+.Li # ,
+.Li //
+or are enclosed in
+.Li /* */ .
+.Pp
+The file describes the
+.Ic network Ns s
+.Xr bootd 8
+is attached to, the
+.Ic service Ns s
+(protocols) it offers, and the
+.Ic host Ns s
+it serves, with the services each may use and the files it may load.
+.Ic class Ns es
+hold what several hosts share.
+.Pp
+.Nm bootd Cm check
+reports errors and warnings with file and line.
+.Sh TOP LEVEL
+.Bl -tag -width Ds
+.It Ic root No = Ar path
+The directory relative paths of files, disks, exports and NIS maps are
+relative to.
+A relative
+.Ic root
+is relative to the directory of the configuration file, which is also
+the default.
+.It Ic log Brq ...
+Logging:
+.Bl -tag -width Ds
+.It Ic level No = Ar string
+.Cm debug ,
+.Cm info
+(the default),
+.Cm warn
+or
+.Cm error .
+.It Ic format No = Ar string
+.Cm text
+(the default) or
+.Cm json .
+.It Ic file No = Ar path
+Where to log:
+.Cm stderr
+(the default),
+.Cm stdout ,
+or a file.
+.It Ic services No = Ar map
+The level for single services, e.g.\&
+.Li { tftp = \&"debug\&" } .
+.El
+.It Ic resolve Brq ...
+How addresses that a host does not give are looked up:
+.Bl -tag -width Ds
+.It Ic ethers No = Ar path
+The
+.Xr ethers 5
+file for Ethernet addresses, by host name.
+The default is
+.Pa /etc/ethers ;
+an empty string disables it.
+.It Ic dns No = Ar bool
+Whether to look up IP addresses with the system resolver, which includes
+.Pa /etc/hosts .
+The default is true.
+.El
+.El
+.Sh NETWORKS
+.Bl -tag -width Ds
+.It Ic network Qo Ar name Qc Brq ...
+An Ethernet segment.
+.Xr bootd 8
+has its own Ethernet and IP address on it and runs its own IP stack
+there.
+Frames are exchanged over UDP with
+.Ic udp ,
+or captured on an interface with
+.Ic pcap .
+.Bl -tag -width Ds
+.It Ic address No = Ar address/prefix
+bootd's IPv4 address and prefix length on the network, e.g.\&
+.Li 192.168.1.250/24 .
+Required.
+.It Ic mac No = Ar address
+bootd's Ethernet address on the network.
+The default is a locally administered address derived from the network's
+name.
+.Cm interface
+uses the address of the
+.Ic pcap
+interface, which Wi-Fi needs.
+.It Ic udp No = Ar addr : Ns Ar port
+The UDP address to exchange Ethernet frames on, one frame per datagram,
+with
+.Xr bootbridge 8 ,
+simh or QEMU.
+Addresses that send to it are learned as peers.
+.It Ic peers No = Ar list
+UDP addresses that always receive frames, and a keepalive every minute.
+.It Ic l2tp Brq ...
+Wrap the frames sent over
+.Ic udp
+in static L2TPv3, as
+.Xr bootbridge 8 ,
+Linux and QEMU speak it:
+.Bl -tag -width Ds
+.It Ic session No = Ar number
+The session ID in both directions.
+The default is 1.
+.It Ic cookie No = Ar string
+8 or 16 hex digits, the same in both directions, e.g.\&
+.Li \&"0x0123456789abcdef\&" .
+Datagrams without it are ignored.
+.It Ic counter No = Ar bool
+Whether frames carry the L2-specific sublayer with a sequence number.
+The default is true.
+.El
+.It Ic pcap No = Ar interface
+Capture on a network interface directly, instead of
+.Ic udp .
+This needs privileges.
+.El
+.El
+.Sh SERVICES
+.Bl -tag -width Ds
+.It Ic service Qo Ar name Qc Brq ...
+Enable a protocol.
+Requests for a protocol without a
+.Ic service
+block are not answered.
+.Bl -tag -width Ds
+.It Ic networks No = Ar list
+The networks the service is offered on.
+The default is every network.
+.El
+.Pp
+The other settings depend on the protocol:
+.Bl -tag -width Ds
+.It Ic service Qq rarp
+Reverse ARP.
+It answers with bootd's address on the network, and needs the host's
+Ethernet and IP address.
+No settings.
+.It Ic service Qq rmp
+HP Remote Maintenance Protocol, for HP 9000/300 and /400 boot ROMs.
+Clients without a host entry are matched to a class by the machine type
+they send.
+The boot ROM lists the host's files in configuration order.
+.Bl -tag -width Ds
+.It Ic server_name No = Ar string
+The name sent to clients asking for the server.
+The default is the host name.
+.El
+.It Ic service Qq nd
+Sun Network Disk, for the Sun-2 boot PROM, which reads public unit 0
+before it knows its IP address; the host needs an Ethernet address.
+.Bl -tag -width Ds
+.It Ic window No = Ar number
+1 KB packets sent before waiting for the client.
+The default is 6.
+.It Ic send_delay No = Ar milliseconds
+The pause before each packet, for clients that cannot keep up.
+The default is 10.
+.El
+.It Ic service Qq tftp
+TFTP, read only, with the blksize, tsize and timeout options.
+Clients are identified by IP address.
+A request for a path such as
+.Pa /tftpboot/name
+also matches a file named
+.Pa name .
+Refusals of requests sent to a broadcast address are only logged, so that
+another server can answer.
+.Bl -tag -width Ds
+.It Ic port No = Ar number
+The default is 69.
+.It Ic timeout No = Ar seconds
+Before retransmitting, unless the client asks for another timeout.
+The default is 2.
+.It Ic retries No = Ar number
+How often a packet is sent before giving up.
+The default is 5.
+.It Ic max_blksize No = Ar number
+The largest blksize option accepted.
+The default, 1468, keeps packets within one Ethernet frame.
+.El
+.It Ic service Qq bootparam
+Sun bootparam, with a built-in portmapper.
+.Li GETFILE Ar name
+answers with the host's
+.Ic export Qq Ar name ,
+so bootparam and NFS always agree;
+.Li dump
+gets an empty answer when there is no such export, and
+.Li gateway
+the router and netmask.
+Unknown clients and keys get no answer, so that another server can answer.
+.Bl -tag -width Ds
+.It Ic server_name No = Ar string
+The name announced as the NFS server.
+The default is the host name.
+.It Ic domain No = Ar string
+The NIS domain announced to clients.
+The default is the
+.Ic nis
+service's domain, for hosts that may use
+.Ic nis .
+.It Ic router No = Ar address
+The default is bootd's address on the network.
+.El
+.It Ic service Qq nfs
+NFS version 2 and MOUNT version 1 over UDP, read only.
+It serves the host's
+.Ic export Ns s ;
+a client may only mount its own.
+No settings.
+.It Ic service Qq nis
+NIS (YP), read only, for one domain.
+The maps are made from files in
+.Pa /etc
+format in the
+.Ic maps
+directory:
+.Pa passwd ,
+.Pa group ,
+.Pa hosts ,
+.Pa ethers ,
+.Pa netgroup ,
+.Pa services ,
+.Pa protocols ,
+.Pa rpc ,
+.Pa networks ,
+.Pa netmasks ,
+.Pa aliases ,
+.Pa publickey
+and
+.Pa bootparams ,
+keyed as SunOS's
+.Pa /var/yp/Makefile
+keys them.
+A missing file means no map.
+The configured hosts are added to the
+.Pa hosts
+and
+.Pa ethers
+maps, and so is bootd itself, with its address on each network.
+.Bl -tag -width Ds
+.It Ic domain No = Ar string
+The NIS domain.
+Required.
+.It Ic maps No = Ar path
+The directory with the source files.
+.It Ic server_name No = Ar string
+The master's name, added to the hosts maps.
+The default is the host name up to the first dot.
+.El
+.El
+.El
+.Sh HOSTS AND CLASSES
+.Bl -tag -width Ds
+.It Ic host Qo Ar name Qc Brq ...
+A client.
+Its name is also its host name for bootparam and NIS.
+.Bl -tag -width Ds
+.It Ic mac No = Ar address
+The Ethernet address.
+The default is looked up in the
+.Ic ethers
+file.
+.It Ic ip No = Ar address
+The IP address.
+The default is looked up by name.
+.It Ic class No = Ar name
+A class whose services, files, disks and exports the host gets as well.
+The host's own take precedence over the class's of the same name.
+.It Ic services No = Ar list
+The services the host may use.
+The default is the class's, or every enabled service;
+.Li \&"all\&"
+means every enabled service.
+.It Ic file , disk , export
+See
+.Sx FILES ,
+below.
+.El
+.It Ic class Qo Ar name Qc Brq ...
+Settings shared by hosts, with
+.Ic services ,
+.Ic file ,
+.Ic disk
+and
+.Ic export
+as in a host.
+.Bl -tag -width Ds
+.It Ic match No = Ar map
+Serve clients that have no host entry when they identify as the given
+model.
+The only key is
+.Ic rmp_machtype ,
+the machine type an HP boot ROM sends, e.g.\&
+.Li { rmp_machtype = \&"HPS300\&" } .
+.El
+.El
+.Sh FILES
+.Bl -tag -width Ds
+.It Ic file Qo Ar path Qc Brq ...
+A file a host may load.
+.Bl -tag -width Ds
+.It Ic name No = Ar string
+The name the client asks for.
+The default is the base name of
+.Ar path ;
+.Li \&"*\&"
+matches any name.
+.It Ic aliases No = Ar list
+Other names for the file.
+.It Ic services No = Ar list
+The services that may serve it.
+The default is all the host's services.
+.El
+.It Ic disk Qo Ar name Qc Brq ...
+A disk served over ND.
+.Bl -tag -width Ds
+.It Ic path No = Ar path
+The disk image, or the first-stage boot program.
+Required.
+.It Ic mode No = Ar string
+.Cm image
+(the default), a disk image, or
+.Cm bootfile ,
+which works like NetBSD's ndbootd: the boot program in
+.Ic path
+(at most 15 blocks) is served from block 1 on.
+A
+.Cm bootfile
+disk is also served as public unit 0
+.Pq Li ndp0 ,
+which the Sun-2 PROM boots from.
+.It Ic boot2 No = Ar path
+For
+.Cm bootfile
+disks, a second-stage boot program served from block 16 on.
+.It Ic unit No = Ar number
+The ND minor device number: 64 +
+.Ar n
+for
+.Li ndp Ns Ar n .
+The default is 0.
+.It Ic writable No = Ar bool
+Not supported yet.
+.El
+.It Ic export Qo Ar name Qc Brq ...
+A directory served over NFS and announced by bootparam, usually
+.Qq root
+and
+.Qq swap .
+.Bl -tag -width Ds
+.It Ic path No = Ar path
+Required.
+.It Ic server No = Ar string
+Another NFS server that serves the export, which bootparam announces
+instead of bootd.
+.It Ic spec No = Ar path
+An
+.Xr mtree 5
+specification of the export's files.
+The owners, modes, device nodes and symbolic links it lists are served as
+given, so that a root file system extracted without root privileges can
+be served, e.g. with a specification made by
+.Dl tar -cf root.mtree --format=mtree @root.tgz
+.It Ic export_path No = Ar path
+The path clients mount and bootparam announces.
+The default is the absolute
+.Ic path .
+NetBSD keeps
+.Ar server : Ns Ar path
+in 90 bytes.
+.It Ic writable No = Ar bool
+Not supported yet.
+.El
+.El
+.Sh EXAMPLES
+A SPARCstation that loads its boot program over TFTP and mounts its root
+over NFS, attached through
+.Xr bootbridge 8 :
+.Bd -literal -offset indent
+root = "/srv/netboot"
+
+network "lab" {
+  address = "192.168.1.250/24"
+  udp     = "127.0.0.1:4712"
+  peers   = ["127.0.0.1:4711"]
+}
+
+service "rarp" {}
+service "tftp" {}
+service "bootparam" {}
+service "nfs" {}
+
+host "kali" {
+  # mac and ip are looked up in /etc/ethers and DNS.
+  services = ["rarp", "tftp", "bootparam", "nfs"]
+
+  # The boot PROM asks for its IP address in hex.
+  file "files/sparc/solaris-2.5.1-sun4c" { name = "*" }
+  export "root" { path = "/export/hosts/kali/root" }
+  export "swap" { path = "/export/hosts/kali/swap" }
+}
+.Ed
+.Pp
+HP 9000/300 machines without host entries, chosen by machine type:
+.Bd -literal -offset indent
+service "rmp" {}
+
+class "hp300" {
+  match    = { rmp_machtype = "HPS300" }
+  services = ["rmp"]
+
+  file "files/hp300/netbsd-uboot" { name = "netbsd" }
+}
+.Ed
+.Pp
+A Sun-2 booting NetBSD over ND:
+.Bd -literal -offset indent
+host "sun2" {
+  services = ["rarp", "nd", "bootparam", "nfs"]
+
+  disk "boot" {
+    path  = "files/sun2/bootyy"
+    boot2 = "files/sun2/netboot"
+    mode  = "bootfile"
+  }
+  export "root" {
+    path = "/export/hosts/sun2/root"
+    spec = "/export/hosts/sun2/root.mtree"
+  }
+}
+.Ed
+.Pp
+A network reached over L2TPv3 from
+.Xr bootbridge 8
+on another machine:
+.Bd -literal -offset indent
+network "remote" {
+  address = "192.168.1.251/24"
+  udp     = "0.0.0.0:1701"
+  peers   = ["192.168.1.10:1701"]
+  l2tp { cookie = "0x0123456789abcdef" }
+}
+.Ed
+.Pp
+The packages include a commented example with every setting, in
+.Pa /usr/share/doc/gobootd/examples/bootd.hcl
+on Debian and Ubuntu.
+.Sh SEE ALSO
+.Xr ethers 5 ,
+.Xr mtree 5 ,
+.Xr bootbridge 8 ,
+.Xr bootd 8
+.Pp
+.Lk https://github.com/hashicorp/hcl

@@ -187,6 +187,9 @@ an IP address of bootd's own).
   only logged, so another server can answer.
 
 Options for each protocol are listed in [`etc/bootd.hcl`](etc/bootd.hcl).
+The manual pages [bootd(8)](man/bootd.8), [bootbridge(8)](man/bootbridge.8)
+and [bootd.hcl(5)](man/bootd.hcl.5) describe every command, flag and setting
+(`man ./man/bootd.8` reads one from the source tree).
 
 ## Building
 

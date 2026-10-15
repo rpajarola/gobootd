@@ -1,0 +1,210 @@
+.Dd October 14, 2026
+.Dt BOOTD 8
+.Os
+.Sh NAME
+.Nm bootd
+.Nd boot server for old and unusual machines
+.Sh SYNOPSIS
+.Nm
+.Op Cm run
+.Op Fl c Ar config
+.Nm
+.Cm check
+.Op Fl c Ar config
+.Op Fl q
+.Nm
+.Cm explain
+.Op Fl c Ar config
+.Ar client
+.Op Ar service Op Ar file
+.Nm
+.Cm version
+.Sh DESCRIPTION
+.Nm
+network-boots old and unusual machines over many boot protocols, all set up
+from one configuration file,
+.Xr bootd.hcl 5 .
+Each client is described once, with its addresses, the protocols it may use
+and the files it may load, and every protocol answers from that one
+description.
+Every request that is refused is logged with the reason.
+.Pp
+The protocols are:
+.Bl -tag -width bootparam -offset indent
+.It Cm rarp
+Reverse ARP, for Sun, DEC, HP and other clients that learn their IP
+address from their Ethernet address.
+.It Cm rmp
+HP Remote Maintenance Protocol, for the boot ROMs of the HP 9000/300 and
+/400.
+.It Cm nd
+Sun Network Disk, for the Sun-2 boot PROM.
+Read only.
+.It Cm tftp
+TFTP, read only, with the blksize, tsize and timeout options.
+.It Cm bootparam
+Sun bootparam, with a built-in portmapper that answers broadcast
+.Dv CALLIT
+requests.
+.It Cm nfs
+NFS version 2 and MOUNT version 1 over UDP, read only.
+.It Cm nis
+NIS (YP), read only, without map transfers.
+.El
+.Pp
+.Nm
+works on Ethernet frames and runs its own IP stack, with its own Ethernet
+and IP address on each network.
+It answers ARP itself and knows the Ethernet address of every configured
+host, so it reaches clients that do not answer ARP before their operating
+system runs.
+It needs no privileges and does not use the host's addresses or ports.
+.Pp
+A network carries frames over UDP, one Ethernet frame per datagram (the
+format of the HECnet bridge, which simh and QEMU speak), optionally wrapped
+in static L2TPv3.
+.Xr bootbridge 8
+connects a real network interface to it; emulators can send to
+.Nm
+directly.
+A network can also capture on an interface with libpcap, which needs
+privileges.
+.Pp
+The commands are:
+.Bl -tag -width Ds
+.It Cm run
+Run the boot server.
+This is the default when no command is given.
+It runs in the foreground and logs to standard error unless the
+configuration says otherwise.
+.It Cm check
+Validate the configuration, reporting errors and warnings with file and
+line, then list every host with its addresses (and where they came from),
+services and files.
+.It Cm explain Ar client Op Ar service Op Ar file
+Show how a request from
+.Ar client ,
+a host name, Ethernet address or IP address, would be handled, following
+it through the same lookups the protocols use: which host it matches, and
+that host's addresses, services and files.
+With
+.Ar service ,
+also whether the service is enabled and allowed for the host, and which
+file it would serve; with
+.Ar file ,
+which file a request for that name would get.
+.It Cm version
+Print the version.
+.El
+.Pp
+The options are:
+.Bl -tag -width Ds
+.It Fl c Ar config
+The configuration file.
+The default is
+.Pa /etc/bootd.hcl .
+.It Fl q
+With
+.Cm check ,
+only print problems.
+.El
+.Sh SIGNALS
+.Bl -tag -width SIGTERM
+.It Dv SIGHUP
+Reload the configuration's hosts, classes and files, and the NIS map
+sources.
+Changes to networks, services and logging take effect on restart.
+.It Dv SIGINT , Dv SIGTERM
+Exit.
+.El
+.Sh FILES
+.Bl -tag -width /usr/local/etc/bootd.hcl -compact
+.It Pa /etc/bootd.hcl
+The default configuration file.
+.It Pa /etc/ethers
+Ethernet addresses of hosts that do not give one, see
+.Xr ethers 5 .
+.It Pa /var/lib/bootd
+The root for boot files in the Debian and Ubuntu packages.
+.It Pa /usr/local/etc/bootd.hcl
+The configuration file of the macOS package and of Homebrew on Intel
+Macs.
+.El
+.Sh EXIT STATUS
+.Nm
+exits 0 on success and 2 for invalid usage.
+It exits 1 if the configuration has errors or the server fails, and
+.Cm explain
+exits 1 if the request would be refused.
+.Sh EXAMPLES
+Check a configuration and list what it serves:
+.Pp
+.Dl $ bootd check -c bootd.hcl
+.Pp
+Show how a TFTP request for a SPARCstation's boot program would be
+handled:
+.Pp
+.Dl $ bootd explain kali tftp C0A80105.SUN4C
+.Pp
+Connect the Ethernet interface en0 to a
+.Nm
+on the same machine, then run
+.Nm :
+.Bd -literal -offset indent
+# bootbridge -i en0 -listen 127.0.0.1:4711 -peer 127.0.0.1:4712
+$ bootd -c bootd.hcl
+.Ed
+.Pp
+with this network in the configuration:
+.Bd -literal -offset indent
+network "lab" {
+  address = "192.168.1.250/24"
+  udp     = "127.0.0.1:4712"
+  peers   = ["127.0.0.1:4711"]
+}
+.Ed
+.Pp
+Attach simh or QEMU to the same
+.Nm :
+.Bd -literal -offset indent
+sim> attach xq udp:4713:127.0.0.1:4712
+qemu-system-sparc ... -netdev dgram,id=n0,local.type=inet,\e
+    local.host=127.0.0.1,local.port=4713,remote.type=inet,\e
+    remote.host=127.0.0.1,remote.port=4712
+.Ed
+.Sh SEE ALSO
+.Xr bootd.hcl 5 ,
+.Xr ethers 5 ,
+.Xr bootbridge 8
+.Pp
+.Lk https://github.com/rpajarola/gobootd
+.Sh STANDARDS
+.Rs
+.%R RFC 903
+.%T A Reverse Address Resolution Protocol
+.Re
+.Rs
+.%R RFC 1350
+.%T The TFTP Protocol (Revision 2)
+.Re
+.Rs
+.%R RFC 1094
+.%T NFS: Network File System Protocol Specification
+.Re
+.Rs
+.%R RFC 3931
+.%T Layer Two Tunneling Protocol - Version 3 (L2TPv3)
+.Re
+.Sh HISTORY
+.Nm
+is a Go reimplementation of an earlier bootd.
+It is not a drop-in replacement.
+.Sh AUTHORS
+.An Rico Pajarola Aq Mt rp@servium.ch
+.Sh BUGS
+NFS, ND and TFTP are read only: writable exports and disks are not
+written to.
+NIS cannot transfer maps to slave servers, and does not make
+.Pa netgroup.byuser
+and
+.Pa netgroup.byhost .

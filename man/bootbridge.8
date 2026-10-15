@@ -1,0 +1,275 @@
+.Dd October 14, 2026
+.Dt BOOTBRIDGE 8
+.Os
+.Sh NAME
+.Nm bootbridge
+.Nd connect a network interface to bootd and emulators over UDP
+.Sh SYNOPSIS
+.Nm
+.Op Fl c Ar config
+.Fl i Ar interface
+.Op Fl listen Ar addr : Ns Ar port
+.Op Fl peer Ar addr : Ns Ar port ...
+.Op Fl l2tp Ar addr : Ns Ar port
+.Op Fl l2tp-peer Ar addr : Ns Ar port ...
+.Op Fl session Ar id
+.Op Fl cookie Ar hex
+.Op Fl counter Ns = Ns Ar bool
+.Op Fl stats Ar duration
+.Op Fl v
+.Op Fl print
+.Op Fl X
+.Op Fl print-iface Ar name
+.Nm
+.Fl version
+.Sh DESCRIPTION
+.Nm
+bridges an Ethernet interface to UDP, so that
+.Xr bootd 8 ,
+simh, QEMU and other emulators can exchange frames with the machines on
+it.
+It is the only part of gobootd that needs to capture: it must run as root,
+with
+.Dv CAP_NET_RAW
+on Linux, or with access to
+.Pa /dev/bpf*
+on BSD and macOS.
+.Pp
+Frames travel over UDP in one of two formats, on separate listeners that
+can run at once:
+.Bl -tag -width L2TPv3
+.It raw
+One Ethernet frame per datagram, with no header, as the HECnet bridge,
+simh
+.Pq Li attach xq udp:...
+and QEMU
+.Pq Fl netdev Cm dgram
+send them.
+There is no authentication, so the raw listener should stay on a loopback
+address;
+.Nm
+warns about any other address.
+.It L2TPv3
+Static L2TPv3 over UDP (RFC 3931) carrying Ethernet, without the control
+connection, as Linux
+.Pq Nm ip Cm l2tp
+and QEMU
+.Pq Fl netdev Cm l2tpv3
+speak it.
+Datagrams with the wrong session or cookie are dropped, so the cookie
+keeps out anyone who does not know it.
+It is sent in clear, which is no protection against anyone who can see
+the traffic.
+.El
+.Pp
+Every endpoint is a UDP address.
+Fixed peers always receive frames.
+Any other address that sends a valid frame becomes a peer for 180 seconds.
+Unicast frames go to the peer that last sent from their destination
+address, as in a learning switch; broadcast, multicast and frames for
+unknown destinations go to every peer.
+Frames also pass between peers, never back to the peer they came from.
+Fixed peers are sent a keepalive every 60 seconds.
+.Pp
+The options are:
+.Bl -tag -width Ds
+.It Fl c Ar config
+Read the settings from an HCL configuration file (see
+.Sx CONFIGURATION ) .
+Options given on the command line override it.
+.It Fl i Ar interface
+The network interface to bridge.
+Required, here or in the configuration file.
+.It Fl listen Ar addr : Ns Ar port
+The UDP address to exchange raw frames on.
+The default is 127.0.0.1:4711; an empty string disables the raw listener.
+.It Fl peer Ar addr : Ns Ar port
+A raw peer that always receives frames.
+Can be given more than once.
+.It Fl l2tp Ar addr : Ns Ar port
+The UDP address to exchange L2TPv3 frames on.
+None by default.
+.It Fl l2tp-peer Ar addr : Ns Ar port
+An L2TPv3 peer that always receives frames.
+Can be given more than once.
+.It Fl session Ar id
+The L2TPv3 session ID, the same in both directions.
+The default is 1.
+.It Fl cookie Ar hex
+The L2TPv3 cookie, 8 or 16 hex digits, the same in both directions.
+.It Fl counter Ns = Ns Ar bool
+Whether L2TPv3 frames carry the L2-specific sublayer with a sequence
+number, as Linux and QEMU do by default.
+The default is true.
+.It Fl stats Ar duration
+How often to log interface statistics, such as
+.Li 30s
+(the default) or
+.Li 5m ;
+0 disables them.
+.It Fl v
+Log every forwarding error.
+.It Fl print , Fl p
+Print packets as they pass through the bridge.
+.It Fl X , Fl dump
+Print packets with a hex and ASCII dump, like
+.Nm tcpdump Fl X .
+.It Fl print-iface Ar name , Fl print-interface Ar name
+Only print packets on one side:
+.Cm udp ,
+.Cm lan ,
+.Cm all
+(the default), or an interface name.
+.It Fl version
+Print the version.
+.El
+.Pp
+When standard input is a terminal,
+.Nm
+reads single keys:
+.Pp
+.Bl -tag -width "p, Space, Enter" -offset indent -compact
+.It Ic p , Space , Enter
+Toggle printing packets.
+.It Ic x , v , d
+Toggle the hex dump.
+.It Ic i
+Cycle the printed side: all, udp, lan.
+.It Ic u , l , a
+Print udp, lan or all packets.
+.It Ic s
+Print the interface statistics.
+.It Ic q
+Quit.
+.It Ic h , ?
+Show the keys.
+.El
+.Sh CONFIGURATION
+The configuration file is HCL, the format
+.Xr bootd.hcl 5
+describes.
+Only the listeners it declares are opened: without a
+.Ic raw
+block there is no raw listener.
+Its settings are:
+.Bl -tag -width Ds
+.It Ic interface No = Ar string
+The network interface, as
+.Fl i .
+.It Ic stats No = Ar duration
+As
+.Fl stats .
+.It Ic verbose No = Ar bool
+As
+.Fl v .
+.It Ic print No = Ar bool
+As
+.Fl print .
+.It Ic dump No = Ar bool
+As
+.Fl X .
+.It Ic print_interface No = Ar string
+As
+.Fl print-iface .
+.It Ic raw Brq ...
+The raw listener, with
+.Ic listen
+(default 127.0.0.1:4711) and
+.Ic peers ,
+a list of fixed peers.
+.It Ic l2tp Brq ...
+The L2TPv3 listener, with
+.Ic listen
+(required),
+.Ic peers ,
+.Ic session ,
+.Ic cookie
+and
+.Ic counter .
+.El
+.Pp
+.Fl peer
+and
+.Fl l2tp-peer
+replace the file's lists of peers.
+Errors are reported with file and line.
+A file that holds a cookie should be readable by root only;
+.Nm
+warns if anyone can read it.
+.Sh FILES
+.Bl -tag -width /usr/local/etc/bootbridge.hcl -compact
+.It Pa /etc/bootbridge.hcl
+The configuration file the Debian and Ubuntu service uses.
+.It Pa /usr/local/etc/bootbridge.hcl
+The configuration file the macOS launch daemon uses.
+.El
+.Sh EXIT STATUS
+.Nm
+exits 0 when it is stopped, 1 if it cannot open the interface or a
+listener, and 2 for invalid usage or configuration.
+.Sh EXAMPLES
+Connect en0 to a
+.Xr bootd 8
+listening on 127.0.0.1:4712:
+.Pp
+.Dl # bootbridge -i en0 -listen 127.0.0.1:4711 -peer 127.0.0.1:4712
+.Pp
+Accept L2TPv3 from
+.Xr bootd 8
+or QEMU on other machines, which need to know the cookie:
+.Pp
+.Dl # bootbridge -i en0 -l2tp 0.0.0.0:1701 -cookie 0x0123456789abcdef
+.Pp
+The same as a configuration file, with a raw listener for local
+emulators as well:
+.Bd -literal -offset indent
+interface = "en0"
+
+raw {
+  listen = "127.0.0.1:4711"
+}
+
+l2tp {
+  listen = "0.0.0.0:1701"
+  cookie = "0x0123456789abcdef"
+}
+.Ed
+.Pp
+Connect QEMU on Linux to that L2TPv3 listener on 192.168.1.10:
+.Bd -literal -offset indent
+-netdev l2tpv3,id=n0,udp=on,src=0.0.0.0,srcport=1701,\e
+    dst=192.168.1.10,dstport=1701,txsession=1,rxsession=1,\e
+    cookie64=on,txcookie=0x0123456789abcdef,\e
+    rxcookie=0x0123456789abcdef,counter=on
+.Ed
+.Sh SEE ALSO
+.Xr pcap 3PCAP ,
+.Xr bootd.hcl 5 ,
+.Xr bootd 8
+.Sh STANDARDS
+.Rs
+.%R RFC 3931
+.%T Layer Two Tunneling Protocol - Version 3 (L2TPv3)
+.Re
+.Rs
+.%R RFC 4719
+.%T Transport of Ethernet Frames over Layer 2 Tunneling Protocol Version 3 (L2TPv3)
+.Re
+.Sh AUTHORS
+.An Rico Pajarola Aq Mt rp@servium.ch
+.Sh CAVEATS
+Full frames exceed a 1500-byte MTU as UDP datagrams and are fragmented
+across real networks.
+There is no loop protection: two bridges joined twice pass frames around
+forever.
+.Pp
+Wi-Fi access points drop frames from Ethernet addresses that have not
+associated, so bridging a Wi-Fi interface does not work for
+.Xr bootd 8 's
+own address; use a
+.Ic pcap
+network in
+.Xr bootd.hcl 5
+with
+.Ic mac No = Qq interface
+instead.

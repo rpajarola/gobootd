@@ -40,6 +40,7 @@ Debian and Ubuntu:
 /etc/bootd.hcl, /etc/bootbridge.hcl        # conffiles, root:bootd 0640
 /lib/systemd/system/bootd.service          # runs as the bootd user, unprivileged
 /lib/systemd/system/bootbridge.service     # bootd user with CAP_NET_RAW, CAP_NET_ADMIN
+/usr/share/man/man8/bootd.8, bootbridge.8, man5/bootd.hcl.5
 /usr/share/doc/gobootd/examples/           # the full example configurations
 /var/lib/bootd/                            # the default root for boot files
 ```
@@ -64,6 +65,7 @@ macOS (`.pkg`):
 /usr/local/etc/bootd.hcl, bootbridge.hcl   # created if missing
 /Library/LaunchDaemons/io.github.rpajarola.bootd.plist        # runs as nobody
 /Library/LaunchDaemons/io.github.rpajarola.bootbridge.plist   # runs as root (BPF)
+/usr/local/share/man/man8/bootd.8, bootbridge.8, man5/bootd.hcl.5
 /usr/local/share/gobootd/                  # examples, docs, uninstall.sh
 /usr/local/var/bootd/                      # the default root for boot files
 /usr/local/var/log/bootd.log, bootbridge.log

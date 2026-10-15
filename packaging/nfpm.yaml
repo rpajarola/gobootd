@@ -49,6 +49,13 @@ contents:
       owner: root
       group: bootd
 
+  - src: man/bootd.8
+    dst: /usr/share/man/man8/bootd.8
+  - src: man/bootbridge.8
+    dst: /usr/share/man/man8/bootbridge.8
+  - src: man/bootd.hcl.5
+    dst: /usr/share/man/man5/bootd.hcl.5
+
   - src: etc/bootd.hcl
     dst: /usr/share/doc/gobootd/examples/bootd.hcl
   - src: etc/bootbridge.hcl

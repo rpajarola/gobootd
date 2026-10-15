@@ -15,7 +15,8 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 root="$work/root"
 mkdir -p "$root/usr/local/bin" "$root/usr/local/share/gobootd/defaults" \
-  "$root/usr/local/share/gobootd/examples" "$root/Library/LaunchDaemons"
+  "$root/usr/local/share/gobootd/examples" "$root/usr/local/share/man/man5" \
+  "$root/usr/local/share/man/man8" "$root/Library/LaunchDaemons"
 
 for cmd in bootd bootbridge; do
   for arch in arm64 amd64; do
@@ -32,6 +33,8 @@ cp packaging/macos/bootd.hcl packaging/macos/bootbridge.hcl "$share/defaults/"
 cp etc/bootd.hcl etc/bootbridge.hcl "$share/examples/"
 cp README.md LICENSE "$share/"
 cp cmd/bootbridge/README.md "$share/bootbridge.md"
+install -m 0644 man/*.8 "$root/usr/local/share/man/man8/"
+install -m 0644 man/*.5 "$root/usr/local/share/man/man5/"
 install -m 0755 packaging/macos/uninstall.sh "$share/uninstall.sh"
 install -m 0644 packaging/macos/launchd/*.plist "$root/Library/LaunchDaemons/"
 

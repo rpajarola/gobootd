@@ -250,13 +250,13 @@ func (u *UDP) destinations(frame []byte) []netip.AddrPort {
 	}
 	if dst := [6]byte(frame[0:6]); dst[0]&1 == 0 {
 		if p, ok := u.macs[dst]; ok {
+			if slices.Contains(u.static, p) || !u.learned[p].IsZero() {
+				return []netip.AddrPort{p}
+			}
 			for _, s := range u.static {
-				if s == p || s.Addr() == p.Addr() {
+				if s.Addr() == p.Addr() {
 					return []netip.AddrPort{s}
 				}
-			}
-			if !u.learned[p].IsZero() {
-				return []netip.AddrPort{p}
 			}
 		}
 	}

@@ -571,8 +571,11 @@ func TestBridgePacketPrintingAndToggles(t *testing.T) {
 	outBuf.Reset()
 	outMu.Unlock()
 
-	if !strings.Contains(out1, "-> all") || !strings.Contains(out1, "Ethernet") {
+	if !strings.Contains(out1, "-> all") || !strings.Contains(out1, "02:00:00:00:00:11 > ff:ff:ff:ff:ff:ff") || !strings.Contains(out1, "0x9000") {
 		t.Errorf("expected summary packet output, got:\n%s", out1)
+	}
+	if strings.Count(strings.TrimSpace(out1), "\n") != 0 {
+		t.Errorf("expected single-line summary packet output, got:\n%s", out1)
 	}
 	// In summary mode, it should not have hex dump offset prefix "00000000"
 	if strings.Contains(out1, "00000000") {

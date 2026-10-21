@@ -6,6 +6,7 @@ package bridge
 import (
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -18,8 +19,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/gopacket/gopacket"
-	"github.com/gopacket/gopacket/layers"
 	"github.com/rpajarola/gobootd/internal/link"
 )
 
@@ -237,7 +236,8 @@ func (b *Bridge) CyclePrintInterface() string {
 
 func isUDPIface(iface string) bool {
 	lower := strings.ToLower(iface)
-	return lower == "udp" || strings.HasPrefix(lower, "udp:")
+	return lower == "udp" || strings.HasPrefix(lower, "udp:") ||
+		lower == "l2tp" || strings.HasPrefix(lower, "l2tp:")
 }
 
 func (b *Bridge) shouldPrintFor(iface string) bool {
@@ -248,7 +248,7 @@ func (b *Bridge) shouldPrintFor(iface string) bool {
 	filter = strings.ToLower(filter)
 
 	isUDP := isUDPIface(iface) || strings.EqualFold(iface, b.udpName())
-	if filter == "udp" || strings.EqualFold(filter, b.udpName()) {
+	if filter == "udp" || filter == "l2tp" || strings.EqualFold(filter, b.udpName()) {
 		return isUDP
 	}
 	if filter == "lan" || strings.EqualFold(filter, b.lanName()) {
@@ -271,14 +271,14 @@ func (b *Bridge) printPacket(iface, prefix string, frame []byte) {
 	if !b.shouldPrintFor(iface) {
 		return
 	}
-	p := gopacket.NewPacket(frame, layers.LayerTypeEthernet, gopacket.Default)
+	line := FormatPacket(time.Now(), prefix, frame)
 	w := b.packetWriter()
 	b.printMu.Lock()
 	defer b.printMu.Unlock()
 	if b.IsDumpPackets() {
-		fmt.Fprintf(w, "[%s]\n%s\n", prefix, p.Dump())
+		fmt.Fprintf(w, "%s\n%s", line, hex.Dump(frame))
 	} else {
-		fmt.Fprintf(w, "[%s] %s\n", prefix, p.String())
+		fmt.Fprintf(w, "%s\n", line)
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 	"github.com/rpajarola/gobootd/internal/config"
 	"github.com/rpajarola/gobootd/internal/resolve"
 	"github.com/rpajarola/gobootd/internal/service"
+	"github.com/rpajarola/gobootd/internal/sunlabel"
 )
 
 // Services that identify clients by MAC address, and services that need to
@@ -238,10 +239,10 @@ func (b *builder) checkHost(h *Host) {
 	}
 	units := map[int]*Disk{}
 	for _, d := range h.Disks {
-		if prev, ok := units[d.Unit]; ok {
-			b.errorf(&d.Origin, "Duplicate disk unit", "Host %q has disks %q and %q both on unit %d.", h.Name, prev.Name, d.Name, d.Unit)
+		if prev, ok := units[d.Minor()]; ok {
+			b.errorf(&d.Origin, "Duplicate disk unit", "Host %q has disks %q and %q both on %s.", h.Name, prev.Name, d.Name, d.MinorName())
 		}
-		units[d.Unit] = d
+		units[d.Minor()] = d
 	}
 	for _, d := range h.Disks {
 		if d.Mode != config.DiskBootfile {
@@ -290,8 +291,31 @@ func (b *builder) files(cs []*config.File) []*File {
 func (b *builder) disks(cs []*config.Disk) []*Disk {
 	var out []*Disk
 	for _, c := range cs {
-		d := &Disk{Name: c.Name, Path: b.path(c.Path), Mode: c.Mode, Unit: c.Unit, Writable: c.Writable, Origin: c.DefRange}
+		d := &Disk{Name: c.Name, Path: b.path(c.Path), Mode: c.Mode, Unit: c.Unit, Public: c.Public, Writable: c.Writable,
+			Offset: c.Offset * sunlabel.SectorSize, Size: c.Size * sunlabel.SectorSize, Origin: c.DefRange}
 		b.exists(d.Path, &c.DefRange)
+		if c.Boot != "" {
+			d.Boot = b.path(c.Boot)
+			b.exists(d.Boot, &c.BootRange)
+			if st, err := os.Stat(d.Boot); err == nil && st.Size() > 15*sunlabel.SectorSize {
+				b.warn(&c.BootRange, "Boot program too large", "%s is %d bytes, but blocks 1-15 hold 7680 bytes.", d.Boot, st.Size())
+			}
+		}
+		if c.Partition != "" {
+			if f, err := os.Open(d.Path); err == nil {
+				l, err := sunlabel.Read(f)
+				f.Close()
+				var p sunlabel.Partition
+				if err == nil {
+					p, err = l.Partition(c.Partition)
+				}
+				if err != nil {
+					b.errorf(&c.PartitionRange, "Cannot use partition", "%s: %v.", d.Path, err)
+				} else {
+					d.Offset, d.Size = p.Start*sunlabel.SectorSize, p.Size*sunlabel.SectorSize
+				}
+			}
+		}
 		if c.Boot2 != "" {
 			d.Boot2 = b.path(c.Boot2)
 			b.exists(d.Boot2, &c.Boot2Range)

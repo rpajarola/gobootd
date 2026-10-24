@@ -40,7 +40,7 @@ func lossyRead(t *testing.T, st *linktest.Port, block, count int32) []byte {
 				continue // duplicate, reordered, or from an earlier request
 			}
 			got = append(got, p.Data...)
-			if p.Op&FlagDone != 0 {
+			if int32(len(got)) == count {
 				cancel()
 				return got
 			}

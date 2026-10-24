@@ -78,7 +78,14 @@ func printHost(w io.Writer, h *inventory.Host) {
 		fmt.Fprintf(tw, "  file\t%s\t%s%s%s\n", strings.Join(names, " | "), f.Path, missing(f.Path), svcs)
 	}
 	for _, d := range h.Disks {
-		fmt.Fprintf(tw, "  disk\t%s (unit %d, %s%s)\t%s%s\n", d.Name, d.Unit, d.Mode, rw(d.Writable), d.Path, missing(d.Path))
+		part := ""
+		if d.Offset != 0 || d.Size != 0 {
+			part = fmt.Sprintf(" sectors %d+%d", d.Offset/512, d.Size/512)
+		}
+		fmt.Fprintf(tw, "  disk\t%s (%s, %s%s)\t%s%s%s\n", d.Name, d.MinorName(), d.Mode, rw(d.Writable), d.Path, part, missing(d.Path))
+		if d.Boot != "" {
+			fmt.Fprintf(tw, "  \t  boot\t%s%s\n", d.Boot, missing(d.Boot))
+		}
 		if d.Boot2 != "" {
 			fmt.Fprintf(tw, "  \t  boot2\t%s%s\n", d.Boot2, missing(d.Boot2))
 		}

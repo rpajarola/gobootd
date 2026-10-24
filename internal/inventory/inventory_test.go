@@ -327,7 +327,7 @@ class "a" {}`, `Class "a" is already defined`},
 host "a" {
   disk "x" { path = "x" }
   disk "y" { path = "y" }
-}`, "both on unit 0"},
+}`, "both on nd0"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, diags := build(t, tc.src)

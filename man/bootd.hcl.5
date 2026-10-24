@@ -170,8 +170,11 @@ The name sent to clients asking for the server.
 The default is the host name.
 .El
 .It Ic service Qq nd
-Sun Network Disk, for the Sun-2 boot PROM, which reads public unit 0
-before it knows its IP address; the host needs an Ethernet address.
+Sun Network Disk, for diskless Sun-2s running SunOS 1 and 2: the boot
+PROM reads public unit 0 before it knows its IP address, and the kernel
+takes its root, swap and other units from the host's disks.
+The host needs an Ethernet address and an IP address; clients learn
+theirs from bootd's replies.
 .Bl -tag -width Ds
 .It Ic window No = Ar number
 1 KB packets sent before waiting for the client.
@@ -358,14 +361,38 @@ which the Sun-2 PROM boots from.
 For
 .Cm bootfile
 disks, a second-stage boot program served from block 16 on.
+.It Ic partition No = Ar letter
+For images, serve one partition
+.Pf ( Cm a
+to
+.Cm h )
+of an image with a Sun disk label.
+.It Ic offset No = Ar sectors
+.It Ic size No = Ar sectors
+For images, serve part of the image instead, like
+.Pa /etc/nd.local ;
+a
+.Ic size
+of 0, the default, means up to the end.
+.It Ic boot No = Ar path
+For images, a boot program such as SunOS's
+.Pa bootnd
+served in place of blocks 1 to 15, where the PROM loads it from.
 .It Ic unit No = Ar number
-The ND minor device number: 64 +
-.Ar n
-for
-.Li ndp Ns Ar n .
+The unit number:
+.Li nd Ns Ar n ,
+or
+.Li ndp Ns Ar n
+with
+.Ic public .
 The default is 0.
+.It Ic public No = Ar bool
+Serve the disk as public unit
+.Li ndp Ns Ar n ,
+shared by clients and read only.
 .It Ic writable No = Ar bool
-Not supported yet.
+Let the client write to the disk, e.g. its root and swap.
+The default is false; writes to read-only disks get an error.
 .El
 .It Ic export Qo Ar name Qc Brq ...
 A directory served over NFS and announced by bootparam, usually

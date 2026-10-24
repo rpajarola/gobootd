@@ -19,7 +19,7 @@ clients, but not yet against real hardware.
 |---|---|---|
 | RARP | Sun, DEC, HP and others | works |
 | RMP | HP 9000/300 and /400 | works |
-| ND | Sun-2 | works (boot only; no writes yet) |
+| ND | Sun-2 | works (diskless SunOS 2.0) |
 | TFTP | most | works (read only; blksize, tsize, timeout options) |
 | bootparam | SunOS, NetBSD, Solaris | works (with a built-in portmapper) |
 | NFSv2 | diskless root/swap | works (read only, MOUNT v1) |

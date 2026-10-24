@@ -98,11 +98,15 @@ func readDisk(t *testing.T, st *linktest.Port, src, dst netip.Addr, block, count
 			if ip.src != netip.MustParseAddr("192.168.1.1") || ip.dst != netip.MustParseAddr("192.168.1.20") {
 				t.Fatalf("reply %s -> %s", ip.src, ip.dst)
 			}
-			if p.Seq != 7 || p.Block != block || p.Offset != int32(len(got)) || int(p.PacketCount) != len(p.Data) {
+			// SunOS takes only packets with DONE as replies.
+			if p.Op&^FlagWait != OpRead|FlagDone || p.Seq != 7 || p.Block != block || p.Offset != int32(len(got)) || int(p.PacketCount) != len(p.Data) {
 				t.Fatalf("reply %v at offset %d", p, len(got))
 			}
 			got = append(got, p.Data...)
-			if p.Op&FlagDone != 0 {
+			if int32(len(got)) == count {
+				if p.Op&FlagWait == 0 {
+					t.Fatalf("last reply %v without WAIT", p)
+				}
 				return got
 			}
 			if p.Op&FlagWait != 0 {
@@ -122,6 +126,11 @@ func TestBootfile(t *testing.T) {
 	// The first stage then reads the second from its own address.
 	if got := readDisk(t, st, netip.MustParseAddr("192.168.1.20"), netip.MustParseAddr("192.168.1.1"), 16, 4096); !bytes.Equal(got, disk[16*512:]) {
 		t.Error("blocks 16- differ")
+	}
+	// The kernel starts on a temporary address made from its serial
+	// number; the reply goes to its real address, which it learns.
+	if got := readDisk(t, st, netip.MustParseAddr("0.0.141.108"), zero, 0, 512); !bytes.Equal(got, disk[:512]) {
+		t.Error("block 0 from the temporary address differs")
 	}
 	if !log.Contains("nd read by sun2 from disk boot") {
 		t.Error("read not logged")
@@ -158,7 +167,8 @@ func TestCheck(t *testing.T) {
 	}{
 		{Packet{Op: OpRead, Count: 1024}, true},
 		{Packet{Op: OpRead | FlagWait, Count: 1024, Offset: 512, PacketCount: 512}, true},
-		{Packet{Op: OpWrite, Count: 1024}, false},
+		{Packet{Op: OpWrite, Count: 1024}, true},
+		{Packet{Op: OpWrite, Count: 1024, PacketCount: 512}, false}, // data missing
 		{Packet{Op: OpRead, Count: 0}, false},
 		{Packet{Op: OpRead, Count: 64 * 1024}, false},
 		{Packet{Op: OpRead, Count: 1024, Offset: 1024}, false},
@@ -169,7 +179,7 @@ func TestCheck(t *testing.T) {
 		if got := check(&p) == ""; got != tc.ok {
 			t.Errorf("%v: ok %v, want %v", tc.p, got, tc.ok)
 		}
-		if tc.ok && p.PacketCount != p.Count-p.Offset && tc.p.PacketCount == 0 {
+		if tc.ok && p.Op&opMask == OpRead && p.PacketCount != p.Count-p.Offset && tc.p.PacketCount == 0 {
 			t.Errorf("%v: packet count not filled in", tc.p)
 		}
 	}

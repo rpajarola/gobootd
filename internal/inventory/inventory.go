@@ -90,8 +90,31 @@ type Disk struct {
 	// empty.
 	Boot2    string
 	Unit     int
+	Public   bool
 	Writable bool
-	Origin   hcl.Range
+	// Offset and Size are the part of the image served, in bytes; a
+	// Size of 0 means up to the end.
+	Offset, Size int64
+	// Boot is a boot program that replaces blocks 1-15, or "".
+	Boot   string
+	Origin hcl.Range
+}
+
+// Minor returns the ND minor device number of the disk.
+func (d *Disk) Minor() int {
+	if d.Public {
+		return d.Unit | 0o100
+	}
+	return d.Unit
+}
+
+// MinorName returns the client's name for the disk, e.g. nd0 or ndp0.
+func (d *Disk) MinorName() string {
+	m := d.Minor()
+	if m&0o100 != 0 {
+		return fmt.Sprintf("ndp%d", m&0o77)
+	}
+	return fmt.Sprintf("nd%d", m&0o77)
 }
 
 // Export is a file system path served over NFS.
@@ -316,14 +339,15 @@ func (h *Host) Export(name string) (*Export, error) {
 	return nil, denied("export %q not configured for this host", name)
 }
 
-// Disk finds a disk by unit number.
-func (h *Host) Disk(unit int) (*Disk, error) {
+// Disk finds a disk by ND minor device number.
+func (h *Host) Disk(minor int) (*Disk, error) {
 	for _, d := range h.Disks {
-		if d.Unit == unit {
+		if d.Minor() == minor {
 			return d, nil
 		}
 	}
-	return nil, denied("disk unit %d not configured for this host", unit)
+	d := &Disk{Unit: minor & 0o77, Public: minor&0o100 != 0}
+	return nil, denied("disk %s not configured for this host", d.MinorName())
 }
 
 // Share finds a share by name, ignoring case like SMB clients do.

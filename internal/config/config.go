@@ -184,13 +184,30 @@ type Disk struct {
 	Mode string `hcl:"mode,optional"`
 	// Boot2 is a second-stage boot program for bootfile disks, served
 	// from block 16 on, after the first-stage program in Path.
-	Boot2    string `hcl:"boot2,optional"`
-	Unit     int    `hcl:"unit,optional"`
-	Writable bool   `hcl:"writable,optional"`
+	Boot2 string `hcl:"boot2,optional"`
+	// Unit is the client's unit number: nd0, nd1 and so on, or ndp0
+	// with Public.
+	Unit int `hcl:"unit,optional"`
+	// Public makes the disk a read-only public unit (ndp<n>), like the
+	// one Sun clients boot from.
+	Public   bool `hcl:"public,optional"`
+	Writable bool `hcl:"writable,optional"`
+	// Partition serves one partition ("a" to "h") of an image with a Sun
+	// disk label. Offset and Size give a part of the image in sectors
+	// instead, like nd.local; a Size of 0 means up to the end.
+	Partition string `hcl:"partition,optional"`
+	Offset    int64  `hcl:"offset,optional"`
+	Size      int64  `hcl:"size,optional"`
+	// Boot replaces blocks 1-15 of an image with a boot program, such
+	// as SunOS's bootnd, which the PROM loads from there.
+	Boot string `hcl:"boot,optional"`
 
-	DefRange   hcl.Range `hcl:",def_range"`
-	ModeRange  hcl.Range `hcl:"mode,attr_range"`
-	Boot2Range hcl.Range `hcl:"boot2,attr_range"`
+	DefRange       hcl.Range `hcl:",def_range"`
+	ModeRange      hcl.Range `hcl:"mode,attr_range"`
+	Boot2Range     hcl.Range `hcl:"boot2,attr_range"`
+	BootRange      hcl.Range `hcl:"boot,attr_range"`
+	PartitionRange hcl.Range `hcl:"partition,attr_range"`
+	UnitRange      hcl.Range `hcl:"unit,attr_range"`
 }
 
 // Export is a directory or file served over NFS and announced by bootparam.
@@ -495,6 +512,31 @@ func checkDisks(disks []*Disk) hcl.Diagnostics {
 		if d.Writable && d.Mode == DiskBootfile {
 			diags = append(diags, errorf(d.DefRange, "Bootfile disk is read only",
 				"Disks with mode = %q cannot be writable.", DiskBootfile))
+		}
+		if d.Writable && d.Public {
+			diags = append(diags, errorf(d.DefRange, "Public disk is read only",
+				"Public units are shared by clients and cannot be writable."))
+		}
+		if d.Mode == DiskBootfile && (d.Partition != "" || d.Offset != 0 || d.Size != 0 || d.Boot != "") {
+			diags = append(diags, errorf(d.DefRange, "Not an image",
+				"partition, offset, size and boot apply to disks with mode = %q.", DiskImage))
+		}
+		if d.Partition != "" && (len(d.Partition) != 1 || d.Partition[0] < 'a' || d.Partition[0] > 'h') {
+			diags = append(diags, errorf(d.PartitionRange, "Invalid partition",
+				"Partition %q is not a letter from a to h.", d.Partition))
+		}
+		if d.Partition != "" && (d.Offset != 0 || d.Size != 0) {
+			diags = append(diags, errorf(d.PartitionRange, "Partition and offset",
+				"Give either partition or offset and size."))
+		}
+		if d.Offset < 0 || d.Size < 0 {
+			diags = append(diags, errorf(d.DefRange, "Invalid offset or size", "Offset and size cannot be negative."))
+		}
+		// Units of 64 and up are raw minor numbers (64 + n is ndp<n>),
+		// as before public existed.
+		if d.Unit < 0 || d.Unit > 0o177 || d.Public && d.Unit > 0o77 {
+			diags = append(diags, errorf(d.UnitRange, "Invalid unit",
+				"Unit %d is not 0 to 63.", d.Unit))
 		}
 	}
 	return diags

@@ -783,3 +783,111 @@ func TestBridgePrintInterfaceFilter(t *testing.T) {
 		t.Errorf("expected LAN packet when filter is %s, got:\n%s", b.LANName(), out5)
 	}
 }
+
+// tcpFrame builds a TCP/IPv4 frame from 10.3.0.5:1021 to 10.3.0.99:512,
+// or the other way if reply is set.
+func tcpFrame(dst, src net.HardwareAddr, reply bool, flags byte, opts, payload []byte) []byte {
+	th := make([]byte, 20, 20+len(opts))
+	sp, dp := uint16(1021), uint16(512)
+	if reply {
+		sp, dp = dp, sp
+	}
+	binary.BigEndian.PutUint16(th[0:2], sp)
+	binary.BigEndian.PutUint16(th[2:4], dp)
+	th[12] = byte((20+len(opts))/4) << 4
+	th[13] = flags
+	th = append(th, opts...)
+	ip := make([]byte, 20)
+	ip[0] = 0x45
+	binary.BigEndian.PutUint16(ip[2:4], uint16(20+len(th)+len(payload)))
+	ip[8], ip[9] = 64, 6
+	a, b := []byte{10, 3, 0, 5}, []byte{10, 3, 0, 99}
+	if reply {
+		a, b = b, a
+	}
+	copy(ip[12:16], a)
+	copy(ip[16:20], b)
+	return link.Build(dst, src, link.TypeIPv4, append(append(ip, th...), payload...))
+}
+
+func TestBridgeSegmentsOffloadedTCP(t *testing.T) {
+	seg := linktest.NewSegment()
+	lanPort := seg.Station("02:00:00:00:00:fe")
+	mac5 := seg.Station("08:00:20:00:00:05")
+	udp := listen(t)
+	b := &Bridge{LAN: lanPort, UDP: udp, Log: slog.New(slog.DiscardHandler)}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go b.Run(ctx)
+
+	emu := listen(t, udp.Addr())
+	mEmu, mMac := mac("08:00:2b:00:00:99"), mac("08:00:20:00:00:05")
+
+	// The emulated host answers a SYN with an MSS of 1024.
+	emu.WriteFrame(tcpFrame(mMac, mEmu, true, 0x12, []byte{2, 4, 4, 0}, nil))
+	if read(mac5) == nil {
+		t.Fatal("SYN-ACK did not reach the LAN")
+	}
+
+	// Receive offload hands the bridge 5000 bytes as one frame.
+	payload := make([]byte, 5000)
+	for i := range payload {
+		payload[i] = byte(i)
+	}
+	mac5.WriteFrame(tcpFrame(mEmu, mMac, false, 0x18, nil, payload))
+	var got []byte
+	for n := 0; n < 5; n++ {
+		f := read(emu)
+		if f == nil {
+			t.Fatalf("got %d segments, want 5", n)
+		}
+		if len(f) > link.MaxFrame {
+			t.Fatalf("segment %d: %d bytes", n, len(f))
+		}
+		data := f[link.HeaderLen+40:]
+		if n < 4 && len(data) != 1024 {
+			t.Errorf("segment %d: %d bytes of data, want 1024", n, len(data))
+		}
+		got = append(got, data...)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Error("payload differs after splitting")
+	}
+
+	// An oversized frame that is not TCP cannot be split.
+	mac5.WriteFrame(link.Build(mEmu, mMac, 0x9000, make([]byte, 3000)))
+	if f := read(emu); f != nil {
+		t.Errorf("oversized non-TCP frame forwarded (%d bytes)", len(f))
+	}
+	if e := b.LANStats().Errors; e != 1 {
+		t.Errorf("LAN errors = %d, want 1", e)
+	}
+}
+
+func TestBridgeSegmentsWithoutSYN(t *testing.T) {
+	seg := linktest.NewSegment()
+	lanPort := seg.Station("02:00:00:00:00:fe")
+	mac5 := seg.Station("08:00:20:00:00:05")
+	udp := listen(t)
+	b := &Bridge{LAN: lanPort, UDP: udp, Log: slog.New(slog.DiscardHandler)}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go b.Run(ctx)
+
+	emu := listen(t, udp.Addr())
+	mEmu, mMac := mac("08:00:2b:00:00:99"), mac("08:00:20:00:00:05")
+	emu.WriteFrame(link.Build(link.Broadcast, mEmu, 0x9000, []byte("hello")))
+	read(mac5)
+
+	// Without the SYN, segments carry the default MSS.
+	mac5.WriteFrame(tcpFrame(mEmu, mMac, false, 0x10, nil, make([]byte, 2000)))
+	for n, want := range []int{536, 536, 536, 392} {
+		f := read(emu)
+		if f == nil {
+			t.Fatalf("got %d segments, want 4", n)
+		}
+		if l := len(f) - link.HeaderLen - 40; l != want {
+			t.Errorf("segment %d: %d bytes of data, want %d", n, l, want)
+		}
+	}
+}

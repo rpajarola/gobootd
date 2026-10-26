@@ -25,6 +25,9 @@ import (
 // lanTimeout is how long a MAC address seen on the LAN is remembered.
 const lanTimeout = 5 * time.Minute
 
+// maxMSSFlows bounds the TCP connections whose MSS is remembered.
+const maxMSSFlows = 4096
+
 type ifStats struct {
 	hosts     map[[6]byte]netip.Addr
 	rxPackets uint64
@@ -90,6 +93,9 @@ type Bridge struct {
 	udp      map[[6]byte]time.Time
 	lanStats ifStats
 	udpStats ifStats
+	// mss is the largest segment that the receiver of each TCP flow from
+	// the LAN to a peer accepts, learned from the peer's SYN.
+	mss map[link.TCPFlow]int
 }
 
 // isLAN reports whether mac is currently known on the LAN.
@@ -392,6 +398,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 	b.mu.Lock()
 	b.lan = map[[6]byte]time.Time{}
 	b.udp = map[[6]byte]time.Time{}
+	b.mss = map[link.TCPFlow]int{}
 	b.lanStats = ifStats{hosts: make(map[[6]byte]netip.Addr)}
 	b.udpStats = ifStats{hosts: make(map[[6]byte]netip.Addr)}
 	if b.LAN != nil && b.LAN.Interface() != nil && len(b.LAN.Interface().MAC) == 6 {
@@ -584,15 +591,63 @@ func (b *Bridge) fromLAN(ctx context.Context) error {
 			continue
 		}
 
-		b.printPacket(b.lanName(), b.lanName()+" -> udp", frame)
+		frames := [][]byte{frame}
+		if len(frame) > link.MaxFrame {
+			if frames = b.segment(frame); frames == nil {
+				b.mu.Lock()
+				b.lanStats.errors++
+				b.mu.Unlock()
+				b.logger().Debug("dropping an oversized frame", "len", len(frame))
+				continue
+			}
+		}
+		for _, frame := range frames {
+			b.printPacket(b.lanName(), b.lanName()+" -> udp", frame)
 
-		if err := b.UDP.WriteFrame(frame); err != nil {
-			b.recordUDPTx(len(frame), 1, err)
-			b.logger().Debug("sending to peers failed", "err", err)
-		} else {
-			b.recordUDPTx(len(frame), 1, nil)
+			if err := b.UDP.WriteFrame(frame); err != nil {
+				b.recordUDPTx(len(frame), 1, err)
+				b.logger().Debug("sending to peers failed", "err", err)
+			} else {
+				b.recordUDPTx(len(frame), 1, nil)
+			}
 		}
 	}
+}
+
+// segment splits a frame larger than Ethernet allows, which receive
+// offload on the LAN interface makes of a burst of TCP segments, into
+// segments no larger than the receiver's MSS. Peers cannot take the
+// oversized frame. It returns nil if the frame cannot be split.
+func (b *Bridge) segment(frame []byte) [][]byte {
+	flow, ok := link.TCPFlowOf(frame)
+	if !ok {
+		return nil
+	}
+	b.mu.Lock()
+	mss, ok := b.mss[flow]
+	b.mu.Unlock()
+	if !ok {
+		// The SYN was not seen, as when the connection is older than
+		// the bridge.
+		mss = link.DefaultMSS
+	}
+	segs, _ := link.SegmentTCP(frame, mss)
+	return segs
+}
+
+// learnMSS remembers the MSS that a peer announces in a TCP SYN, for
+// segmenting what the LAN sends it on that connection.
+func (b *Bridge) learnMSS(frame []byte) {
+	flow, mss, ok := link.SYNMSS(frame)
+	if !ok {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.mss) >= maxMSSFlows {
+		clear(b.mss)
+	}
+	b.mss[flow.Reverse()] = mss
 }
 
 func (b *Bridge) fromUDP(ctx context.Context) error {
@@ -624,6 +679,8 @@ func (b *Bridge) fromUDP(ctx context.Context) error {
 			b.mu.Unlock()
 			continue
 		}
+
+		b.learnMSS(frame)
 
 		peerIP := from.Addr()
 		if !peers[peerIP] {

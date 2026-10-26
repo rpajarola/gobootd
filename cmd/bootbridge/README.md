@@ -205,6 +205,14 @@ Each endpoint has a UDP address, and frames go to its peers:
   datagram, so across a real network with a 1500-byte MTU it is
   fragmented. On loopback, where bootd and emulators normally talk, that
   does not matter.
+- **Receive offload:** Linux merges bursts of TCP segments into one
+  packet of up to 64 KB (GRO) before a capture sees it, and no peer
+  accepts frames larger than 1514 bytes. bootbridge splits such packets
+  back into segments, no larger than the MSS that the receiving peer
+  announced in its SYN (536 bytes if the SYN was not seen, as for a
+  connection older than the bridge). Other oversized frames are dropped
+  and counted as errors. `ethtool -K <interface> gro off` avoids the
+  merging altogether.
 - **No authentication or privacy in raw mode.** Anyone who can send UDP
   to the port can put frames on the segment and receive its broadcasts.
   That is why bootbridge listens on 127.0.0.1 by default and warns about

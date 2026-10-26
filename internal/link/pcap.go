@@ -38,7 +38,8 @@ func OpenPcap(iface string, mac net.HardwareAddr) (Port, error) {
 	}
 	defer in.CleanUp()
 	for _, set := range []func() error{
-		func() error { return in.SetSnapLen(65535) },
+		// Room for the largest packet receive offload merges.
+		func() error { return in.SetSnapLen(262144) },
 		func() error { return in.SetPromisc(promisc) },
 		func() error { return in.SetTimeout(readTimeout) },
 		// Deliver frames as they arrive instead of batching them.

@@ -263,6 +263,17 @@ across real networks.
 There is no loop protection: two bridges joined twice pass frames around
 forever.
 .Pp
+Receive offload (GRO on Linux) merges bursts of TCP segments into packets
+larger than any Ethernet frame before
+.Nm
+captures them.
+.Nm
+splits them again into segments no larger than the MSS the receiving
+peer announced in its SYN, or 536 bytes if it did not see the SYN.
+Other oversized frames are dropped and counted as errors.
+.Dl # ethtool -K enp2s0 gro off
+turns the merging off.
+.Pp
 Wi-Fi access points drop frames from Ethernet addresses that have not
 associated, so bridging a Wi-Fi interface does not work for
 .Xr bootd 8 's

@@ -517,10 +517,10 @@ func formatONCRPC(srcPort, dstPort uint16, b []byte) (string, bool) {
 		prog := dec.Uint32()
 		progVers := dec.Uint32()
 		proc := dec.Uint32()
-		_ = dec.Uint32()      // cred flavor
-		_ = dec.Opaque(400)   // cred
-		_ = dec.Uint32()      // verf flavor
-		_ = dec.Opaque(400)   // verf
+		_ = dec.Uint32()    // cred flavor
+		_ = dec.Opaque(400) // cred
+		_ = dec.Uint32()    // verf flavor
+		_ = dec.Opaque(400) // verf
 		if dec.Err() != nil || vers != 2 {
 			return "", false
 		}

@@ -1,0 +1,138 @@
+.Dd November 1, 2026
+.Dt BOOTBRIDGECTL 1
+.Os
+.Sh NAME
+.Nm bootbridgectl
+.Nd inspect and steer a running bootbridge
+.Sh SYNOPSIS
+.Nm
+.Ar command
+.Op Ar flags
+.Sh DESCRIPTION
+.Nm
+talks to the control socket of a
+.Xr bootbridge 8
+that is running, on the same machine: it reports the interfaces it
+bridges and the peers it knows, prints statistics and the frames that
+pass through, and changes what
+.Xr bootbridge 8
+prints while it runs.
+Every command prints one line of JSON the bridge sends;
+.Fl json
+passes those lines through unchanged, for
+.Xr jq 1 .
+.Pp
+The socket is
+.Fl ctl
+of
+.Xr bootbridge 8 :
+.Pa /run/bootbridge/bootbridge.sock
+when it runs as root
+.Pq or Pa /var/run/bootbridge/bootbridge.sock ,
+where there is no Pa /run ,
+a per-user socket under
+.Ev XDG_RUNTIME_DIR
+or
+.Pa /tmp
+otherwise.
+With several bridges on one machine, give
+.Nm
+.Fl socket
+the path
+.Xr bootbridge 8
+logged when it started.
+.Ev BOOTBRIDGE_CTL_SOCKET
+is the default when no
+.Fl socket
+is given.
+Anyone who can write the socket sees every frame bridged and can change
+what is printed.
+.Pp
+The commands are:
+.Bl -tag -width "dump [-i name]"
+.It Cm status
+The bridge's version, uptime, configuration file, interface, MAC, socket
+path, and packet printing settings.
+.It Cm peers Oo Fl i Ar name Oc
+The UDP peers of every transport: the configured ones, the ones learned
+from the frames they sent, when each was last heard from, and which
+Ethernet addresses were learned from each.
+With the LAN side, the hosts seen there with their IP addresses.
+.Fl i
+limits the output to one side,
+.Cm lan
+or
+.Cm udp ,
+or to one transport by name.
+.It Cm stats Oo Fl w Oc
+Packets, bytes and errors per side, once, or every second with
+.Fl w .
+.It Cm tail Oo Fl n Ar count Oc
+The last
+.Ar count
+frames the bridge forwarded, 20 by default, 0 for all it remembers.
+.It Cm tail Oo Fl t Ar count Oc Fl f
+The remembered frames again, then every new one until interrupted;
+.Fl t
+says how many to replay (50 by default) and
+.Fl n
+stops after that many.
+.It Cm log Oo Fl i Ar name Oc Oo Fl n Ar count Oc Oo Fl t Ar count Oc
+Every frame as it passes, like
+.Xr bootbridge 8
+.Fl print .
+.It Cm dump Oo Fl i Ar name Oc Oo Fl n Ar count Oc Oo Fl t Ar count Oc
+The same with a hex and ASCII dump of each frame, like
+.Xr bootbridge 8
+.Fl X .
+.It Cm set Oo Fl print Ar on Ns | Ns off Oc Oo Fl dump Ar on Ns | Ns off Oc Oo Fl iface Ar name Oc
+Change what
+.Xr bootbridge 8
+prints to its own terminal, as its single keys do, and print the new
+settings.
+.El
+.Pp
+All commands take
+.Fl socket Ar path
+and
+.Fl json .
+.Bl -tag -width "-socket path" -offset indent -compact
+.It Fl socket Ar path
+The control socket to talk to.
+.It Fl json
+Print the JSON lines the bridge sends.
+.El
+.Pp
+A streaming command stops when the terminal interrupts it, when
+.Xr bootbridge 8
+stops, or when
+.Fl n
+frames have been printed.
+.Sh EXIT STATUS
+.Nm
+exits 0 on success, 1 if the socket cannot be reached or the bridge
+reports an error, and 2 for invalid usage.
+.Sh EXAMPLES
+Ask a bridge started as a service what it knows:
+.Pp
+.Dl # bootbridgectl status
+.Dl # bootbridgectl peers
+.Pp
+Watch a client boot, remembering what passed before you started:
+.Pp
+.Dl # bootbridgectl dump -t 100
+.Pp
+Follow the frames of one side and count them:
+.Pp
+.Dl # bootbridgectl tail -f -i udp -n 20
+.Pp
+Turn on the bridge's own packet printing for the LAN side:
+.Pp
+.Dl # bootbridgectl set -print on -iface lan
+.Pp
+Script it:
+.Pp
+.Dl # bootbridgectl status -json | jq .uptime
+.Sh SEE ALSO
+.Xr jq 1 ,
+.Xr bootbridge 8

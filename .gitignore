@@ -4,6 +4,7 @@ test/emulator/netbsd/
 
 main
 cmd/bootbridge/bootbridge
+cmd/bootbridgectl/bootbridgectl
 
 .*.swp
 /dist/

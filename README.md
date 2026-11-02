@@ -115,7 +115,9 @@ header. This is the format of the HECnet bridge, which simh and QEMU speak:
   ```
 
   bootd then uses `udp = "127.0.0.1:4712"` and `peers = ["127.0.0.1:4711"]`.
-  Several peers (bootd, simh, QEMU) can share one bridge.
+  Several peers (bootd, simh, QEMU) can share one bridge. While it runs,
+  `bootbridgectl peers` and `bootbridgectl dump` show who is attached and
+  what passes through.
 - **simh**: `attach xq udp:4713:127.0.0.1:4712`
 - **QEMU**: `-netdev dgram,id=n0,local.type=inet,local.host=127.0.0.1,local.port=4713,remote.type=inet,remote.host=127.0.0.1,remote.port=4712`
 
@@ -187,16 +189,17 @@ an IP address of bootd's own).
   only logged, so another server can answer.
 
 Options for each protocol are listed in [`etc/bootd.hcl`](etc/bootd.hcl).
-The manual pages [bootd(8)](man/bootd.8), [bootbridge(8)](man/bootbridge.8)
-and [bootd.hcl(5)](man/bootd.hcl.5) describe every command, flag and setting
-(`man ./man/bootd.8` reads one from the source tree).
+The manual pages [bootd(8)](man/bootd.8), [bootbridge(8)](man/bootbridge.8),
+[bootbridgectl(1)](man/bootbridgectl.1) and [bootd.hcl(5)](man/bootd.hcl.5)
+describe every command, flag and setting (`man ./man/bootd.8` reads one
+from the source tree).
 
 ## Building
 
-bootd and bootbridge need libpcap and cgo.
+bootd and bootbridge need libpcap and cgo; bootbridgectl does not.
 
 ```
-go build ./cmd/bootd ./cmd/bootbridge
+go build ./cmd/bootd ./cmd/bootbridge ./cmd/bootbridgectl
 go test ./...
 ```
 

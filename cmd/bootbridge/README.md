@@ -36,6 +36,7 @@ sudo bootbridge -i en0 -l2tp 0.0.0.0:1701 -cookie 0x0123456789abcdef
 | `-print` / `-p` | off | print packets as they pass through the bridge |
 | `-X` / `-dump` | off | dump very verbose packet info (hex/ASCII dump, like tcpdump -X) |
 | `-print-iface` | `all` | limit packet printing to an interface (`udp`, `lan`, `all`, or interface name) |
+| `-ctl` | default path | control socket for bootbridgectl (`""` for the default, `-` for none) |
 
 ### Configuration file
 
@@ -78,6 +79,30 @@ While running interactively in a terminal, press any key directly (no need to pr
 - `s`: print current interface statistics on demand.
 - `q`: quit cleanly.
 - `h` or `?`: show keyboard help.
+
+### Debug interface
+
+The keys only work when bootbridge has a terminal, which a systemd service
+or a `.pkg` launchd job does not. bootbridge also listens on a Unix socket,
+and [bootbridgectl](../../man/bootbridgectl.1) talks to it:
+
+```
+$ bootbridgectl status          # version, pid, uptime, interface, printing settings
+$ bootbridgectl peers           # UDP peers and the MAC addresses learned at each
+$ bootbridgectl stats -w        # packet and byte counters, once per second
+$ bootbridgectl tail -n 20      # the last frames the bridge forwarded
+$ bootbridgectl log -i udp      # live, like -print; use dump for -X
+$ bootbridgectl set -print on   # same toggles as the keys
+```
+
+The socket is on by default: `/run/bootbridge/bootbridge.sock` for root
+(`/var/run/&hellip;` on macOS, which has no `/run`), a per-user socket
+elsewhere, overridable with `-ctl path` or the `ctl` setting, and off with
+`-ctl -`. It is mode 0660, because anyone who can
+write it can see every frame the bridge forwards and can change what it
+prints; a non-root service gets its directory from
+`RuntimeDirectory=bootbridge` in the unit file. `-json` on any command
+prints the server's JSON lines unchanged, for `jq`.
 
 bootd then uses a network block such as:
 

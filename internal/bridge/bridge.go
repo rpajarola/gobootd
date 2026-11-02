@@ -93,6 +93,11 @@ type Bridge struct {
 	udp      map[[6]byte]time.Time
 	lanStats ifStats
 	udpStats ifStats
+	// subs receive copies of the frames that pass, for watch and tail.
+	subs []*subscriber
+	// ring holds the last ringSize forwarded frames.
+	ring []FrameEvent
+	seq  uint64
 	// mss is the largest segment that the receiver of each TCP flow from
 	// the LAN to a peer accepts, learned from the peer's SYN.
 	mss map[link.TCPFlow]int
@@ -270,22 +275,24 @@ func (b *Bridge) packetWriter() io.Writer {
 	return os.Stdout
 }
 
-func (b *Bridge) printPacket(iface, prefix string, frame []byte) {
-	if !b.IsPrintPackets() {
-		return
-	}
-	if !b.shouldPrintFor(iface) {
-		return
-	}
-	line := FormatPacket(time.Now(), prefix, frame)
-	w := b.packetWriter()
+func (b *Bridge) printPacket(w io.Writer, e FrameEvent) {
+	line := FormatPacket(e.Time, e.Action, e.Frame)
 	b.printMu.Lock()
 	defer b.printMu.Unlock()
 	if b.IsDumpPackets() {
-		fmt.Fprintf(w, "%s\n%s", line, hex.Dump(frame))
+		fmt.Fprintf(w, "%s\n%s", line, hex.Dump(e.Frame))
 	} else {
 		fmt.Fprintf(w, "%s\n", line)
 	}
+}
+
+// printEvent prints e to the packet writer if printing is enabled and e
+// passes the interface filter.
+func (b *Bridge) printEvent(e FrameEvent) {
+	if !b.IsPrintPackets() || !b.shouldPrintFor(e.Interface) {
+		return
+	}
+	b.printPacket(b.packetWriter(), e)
 }
 
 // LANStats returns a snapshot of the LAN interface statistics.
@@ -586,7 +593,7 @@ func (b *Bridge) fromLAN(ctx context.Context) error {
 		// If destination is unicast and known on the same port (LAN), filter (drop).
 		if !multicast && dstOnLAN {
 			if b.IsDumpPackets() {
-				b.printPacket(b.lanName(), b.lanName()+" (filtered)", frame)
+				b.printEvent(b.record(b.lanName(), b.lanName()+" (filtered)", frame, netip.AddrPort{}))
 			}
 			continue
 		}
@@ -602,7 +609,7 @@ func (b *Bridge) fromLAN(ctx context.Context) error {
 			}
 		}
 		for _, frame := range frames {
-			b.printPacket(b.lanName(), b.lanName()+" -> udp", frame)
+			b.printEvent(b.record(b.lanName(), b.lanName()+" -> udp", frame, netip.AddrPort{}))
 
 			if err := b.UDP.WriteFrame(frame); err != nil {
 				b.recordUDPTx(len(frame), 1, err)
@@ -725,11 +732,11 @@ func (b *Bridge) fromUDP(ctx context.Context) error {
 		sendLAN := multicast || !dstOnUDP
 
 		if relayPeers && sendLAN {
-			b.printPacket(b.udpName(), b.udpName()+" -> all", frame)
+			b.printEvent(b.record(b.udpName(), b.udpName()+" -> all", frame, from))
 		} else if sendLAN {
-			b.printPacket(b.udpName(), b.udpName()+" -> "+b.lanName(), frame)
+			b.printEvent(b.record(b.udpName(), b.udpName()+" -> "+b.lanName(), frame, from))
 		} else if relayPeers {
-			b.printPacket(b.udpName(), b.udpName()+" -> peers", frame)
+			b.printEvent(b.record(b.udpName(), b.udpName()+" -> peers", frame, from))
 		}
 
 		if relayPeers {

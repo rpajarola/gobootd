@@ -14,6 +14,7 @@ Restart=on-failure
 RestartSec=5s
 
 # Capturing and sending on the interface is all bootbridge may do.
+RuntimeDirectory=bootbridge
 AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
 CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN
 NoNewPrivileges=true

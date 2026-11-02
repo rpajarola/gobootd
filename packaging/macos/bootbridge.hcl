@@ -6,6 +6,14 @@
 
 interface = "en0"
 
+# Control socket for bootbridgectl. The launchd job runs as root, whose
+# default is /var/run/bootbridge/bootbridge.sock (macOS has no /run); the
+# daemon logs the path it listens on and bootbridgectl looks for it there.
+# Anyone able to write the socket sees every forwarded frame, so keep the
+# mode at 0600 unless you create a group for it.
+# ctl      = "/var/run/bootbridge.sock"
+# ctl_mode = "0600"
+
 # Raw frames for bootd, simh and QEMU on this machine.
 raw {
   listen = "127.0.0.1:4711"

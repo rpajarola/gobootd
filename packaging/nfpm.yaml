@@ -28,6 +28,10 @@ contents:
     dst: /usr/bin/bootbridge
     file_info:
       mode: 0755
+  - src: dist/bin/bootbridgectl
+    dst: /usr/bin/bootbridgectl
+    file_info:
+      mode: 0755
 
   - src: packaging/systemd/bootd.service
     dst: /lib/systemd/system/bootd.service
@@ -55,6 +59,8 @@ contents:
     dst: /usr/share/man/man8/bootbridge.8
   - src: man/bootd.hcl.5
     dst: /usr/share/man/man5/bootd.hcl.5
+  - src: man/bootbridgectl.1
+    dst: /usr/share/man/man1/bootbridgectl.1
 
   - src: etc/bootd.hcl
     dst: /usr/share/doc/gobootd/examples/bootd.hcl

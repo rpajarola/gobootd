@@ -36,17 +36,20 @@ or the `.pkg` from a release: `sudo installer -pkg gobootd-<version>.pkg -target
 Debian and Ubuntu:
 
 ```
-/usr/bin/bootd, /usr/bin/bootbridge
+/usr/bin/bootd, /usr/bin/bootbridge, /usr/bin/bootbridgectl
 /etc/bootd.hcl, /etc/bootbridge.hcl        # conffiles, root:bootd 0640
 /lib/systemd/system/bootd.service          # runs as the bootd user, unprivileged
 /lib/systemd/system/bootbridge.service     # bootd user with CAP_NET_RAW, CAP_NET_ADMIN
-/usr/share/man/man8/bootd.8, bootbridge.8, man5/bootd.hcl.5
+/usr/share/man/man8/bootd.8, bootbridge.8, man5/bootd.hcl.5, man1/bootbridgectl.1
 /usr/share/doc/gobootd/examples/           # the full example configurations
 /var/lib/bootd/                            # the default root for boot files
 ```
 
 The `bootd` system user is created on install. Neither service is enabled:
-both need a configuration first.
+both need a configuration first. bootbridge's control socket is at
+`/run/bootbridge/bootbridge.sock`, writable by the bootd group, so
+`sudo usermod -aG bootd <you>` (then log in again) lets that user run
+`bootbridgectl` without root.
 
 ```
 sudoedit /etc/bootd.hcl && sudo bootd check
@@ -61,11 +64,11 @@ Removing the package keeps `/var/lib/bootd` and the `bootd` user.
 macOS (`.pkg`):
 
 ```
-/usr/local/bin/bootd, /usr/local/bin/bootbridge
+/usr/local/bin/bootd, /usr/local/bin/bootbridge, /usr/local/bin/bootbridgectl
 /usr/local/etc/bootd.hcl, bootbridge.hcl   # created if missing
 /Library/LaunchDaemons/io.github.rpajarola.bootd.plist        # runs as nobody
 /Library/LaunchDaemons/io.github.rpajarola.bootbridge.plist   # runs as root (BPF)
-/usr/local/share/man/man8/bootd.8, bootbridge.8, man5/bootd.hcl.5
+/usr/local/share/man/man8/bootd.8, bootbridge.8, man5/bootd.hcl.5, man1/bootbridgectl.1
 /usr/local/share/gobootd/                  # examples, docs, uninstall.sh
 /usr/local/var/bootd/                      # the default root for boot files
 /usr/local/var/log/bootd.log, bootbridge.log
@@ -91,10 +94,10 @@ packaging/build-pkg.sh      # on macOS: dist/gobootd-<version>.pkg
 
 The version is the git tag without its `v`, or `0.0.0~git<sha>`; set
 `VERSION` to override it. bootd and bootbridge use libpcap through cgo,
-so the `.deb` is built for the machine's own architecture.
-`build-pkg.sh` builds both macOS architectures and joins them, and signs
-the package if `PKG_SIGN_IDENTITY` names a "Developer ID Installer"
-identity.
+so the `.deb` is built for the machine's own architecture (bootbridgectl
+does not, but is built the same way). `build-pkg.sh` builds both macOS
+architectures and joins them, and signs the package if
+`PKG_SIGN_IDENTITY` names a "Developer ID Installer" identity.
 
 ## Releasing
 

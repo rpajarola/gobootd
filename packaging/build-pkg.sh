@@ -16,9 +16,10 @@ trap 'rm -rf "$work"' EXIT
 root="$work/root"
 mkdir -p "$root/usr/local/bin" "$root/usr/local/share/gobootd/defaults" \
   "$root/usr/local/share/gobootd/examples" "$root/usr/local/share/man/man5" \
-  "$root/usr/local/share/man/man8" "$root/Library/LaunchDaemons"
+  "$root/usr/local/share/man/man1" "$root/usr/local/share/man/man8" \
+  "$root/Library/LaunchDaemons"
 
-for cmd in bootd bootbridge; do
+for cmd in bootd bootbridge bootbridgectl; do
   for arch in arm64 amd64; do
     cc_arch=$arch
     [ "$arch" = amd64 ] && cc_arch=x86_64
@@ -35,6 +36,7 @@ cp README.md LICENSE "$share/"
 cp cmd/bootbridge/README.md "$share/bootbridge.md"
 install -m 0644 man/*.8 "$root/usr/local/share/man/man8/"
 install -m 0644 man/*.5 "$root/usr/local/share/man/man5/"
+install -m 0644 man/*.1 "$root/usr/local/share/man/man1/"
 install -m 0755 packaging/macos/uninstall.sh "$share/uninstall.sh"
 install -m 0644 packaging/macos/launchd/*.plist "$root/Library/LaunchDaemons/"
 

@@ -7,6 +7,12 @@
 
 interface = "eth0"
 
+# Control socket for bootbridgectl. The systemd service gives the bootd
+# user /run/bootbridge; the socket is group-writable, so only members of
+# the bootd group may query the bridge and watch the frames it forwards.
+# ctl      = "/run/bootbridge/bootbridge.sock"
+# ctl_mode = "0660"
+
 # Raw frames for bootd, simh and QEMU on this machine.
 raw {
   listen = "127.0.0.1:4711"

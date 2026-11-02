@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Builds the .deb for this machine's architecture. bootd and bootbridge use
 # libpcap through cgo, so each architecture is built on its own kind of
-# machine (CI uses ubuntu-24.04 and ubuntu-24.04-arm).
+# machine (CI uses ubuntu-24.04 and ubuntu-24.04-arm). bootbridgectl does
+# not, but is built the same way here.
 #
 # Requires Go, libpcap-dev and nfpm (https://nfpm.goreleaser.com):
 #   go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
@@ -21,7 +22,7 @@ fi
 ARCH="${ARCH:-$(dpkg --print-architecture)}"
 
 mkdir -p dist/bin
-for cmd in bootd bootbridge; do
+for cmd in bootd bootbridge bootbridgectl; do
   CGO_ENABLED=1 go build -trimpath -ldflags="-s -w -X $VERSION_VAR=$VERSION" -o "dist/bin/$cmd" "./cmd/$cmd"
 done
 VERSION="$VERSION" ARCH="$ARCH" nfpm pkg --config packaging/nfpm.yaml --packager deb \

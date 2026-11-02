@@ -13,6 +13,12 @@ interface = "en0"
 # dump    = false     # print them with a hex dump, like tcpdump -X
 # print_interface = "all"   # udp, lan, all, or an interface name
 
+# Control socket for bootbridgectl: status, peers, live packet dumps.
+# Unset uses the default path; "-" disables it. The socket is mode 0660,
+# so anyone who can write it can see every frame the bridge forwards.
+# ctl      = "/run/bootbridge/bootbridge.sock"
+# ctl_mode = "0660"
+
 # Raw Ethernet frames over UDP (the HECnet bridge format), for bootd, simh
 # and QEMU on this machine. There is no authentication, so keep it on
 # loopback.

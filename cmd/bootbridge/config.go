@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/netip"
 	"os"
+	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/hashicorp/hcl/v2"
@@ -18,6 +20,8 @@ import (
 type fileConfig struct {
 	Interface      string     `hcl:"interface,optional"`
 	Stats          string     `hcl:"stats,optional"`
+	CTL            string     `hcl:"ctl,optional"`
+	CTLMode        string     `hcl:"ctl_mode,optional"`
 	Verbose        bool       `hcl:"verbose,optional"`
 	Print          bool       `hcl:"print,optional"`
 	Dump           bool       `hcl:"dump,optional"`
@@ -25,7 +29,8 @@ type fileConfig struct {
 	Raw            *rawBlock  `hcl:"raw,block"`
 	L2TP           *l2tpBlock `hcl:"l2tp,block"`
 
-	StatsRange hcl.Range `hcl:"stats,attr_range"`
+	StatsRange   hcl.Range `hcl:"stats,attr_range"`
+	CTLModeRange hcl.Range `hcl:"ctl_mode,attr_range"`
 }
 
 // rawBlock is the raw (HECnet bridge format) listener.
@@ -61,6 +66,8 @@ type settings struct {
 	cookie           string
 	counter          bool
 	stats            time.Duration
+	ctl              string
+	ctlMode          os.FileMode
 	verbose          bool
 	print, dump      bool
 	printIface       string
@@ -68,7 +75,7 @@ type settings struct {
 
 // defaults are the settings without a configuration file.
 func defaults() settings {
-	return settings{listen: "127.0.0.1:4711", session: 1, counter: true, stats: 30 * time.Second, printIface: "all"}
+	return settings{listen: "127.0.0.1:4711", session: 1, counter: true, stats: 30 * time.Second, printIface: "all", ctl: "", ctlMode: 0o660}
 }
 
 // loadConfig reads a configuration file. The diagnostics need the parser's
@@ -95,6 +102,14 @@ func loadConfig(path string) (settings, *hclparse.Parser, hcl.Diagnostics) {
 	}
 
 	s.iface, s.verbose, s.print, s.dump = c.Interface, c.Verbose, c.Print, c.Dump
+	s.ctl = c.CTL
+	if c.CTLMode != "" {
+		m, err := strconv.ParseUint(c.CTLMode, 8, 32)
+		if err != nil || m > 0o777 {
+			errorf(c.CTLModeRange, "Invalid mode", "%q is not an octal file mode, like \"0600\".", c.CTLMode)
+		}
+		s.ctlMode = os.FileMode(m)
+	}
 	if c.PrintInterface != "" {
 		s.printIface = c.PrintInterface
 	}
@@ -151,9 +166,12 @@ func loadConfig(path string) (settings, *hclparse.Parser, hcl.Diagnostics) {
 
 // check turns settings into options. Errors are usage errors.
 func (s settings) check() (options, error) {
-	o := options{iface: s.iface, listen: s.listen, l2tp: s.l2tp, stats: s.stats, printPkts: s.print, dumpPkts: s.dump, printIface: s.printIface}
+	o := options{iface: s.iface, listen: s.listen, l2tp: s.l2tp, stats: s.stats, printPkts: s.print, dumpPkts: s.dump, printIface: s.printIface, ctl: s.ctl, ctlMode: s.ctlMode}
 	if s.iface == "" {
 		return o, fmt.Errorf("no interface: use -i or interface in the configuration file")
+	}
+	if s.ctl != "" && s.ctl != "-" && !filepath.IsAbs(s.ctl) {
+		return o, fmt.Errorf("ctl: %q is not an absolute path", s.ctl)
 	}
 	for _, p := range s.peers {
 		a, err := netip.ParseAddrPort(p)

@@ -16,6 +16,7 @@
 .Op Fl cookie Ar hex
 .Op Fl counter Ns = Ns Ar bool
 .Op Fl stats Ar duration
+.Op Fl ctl Ar path
 .Op Fl v
 .Op Fl print
 .Op Fl X
@@ -107,6 +108,24 @@ How often to log interface statistics, such as
 (the default) or
 .Li 5m ;
 0 disables them.
+.It Fl ctl Ar path
+The Unix socket
+.Xr bootbridgectl 1
+connects to.
+The default is
+.Pa /run/bootbridge/bootbridge.sock
+(or
+.Pa /var/run/bootbridge/bootbridge.sock
+where there is no
+.Pa /run ,
+as on macOS),
+or a socket in
+.Ev XDG_RUNTIME_DIR
+for a user who cannot write
+.Pa /run ;
+an empty string uses the default and
+.Li -
+disables the socket.
 .It Fl v
 Log every forwarding error.
 .It Fl print , Fl p
@@ -144,6 +163,13 @@ Quit.
 .It Ic h , ?
 Show the keys.
 .El
+.Pp
+The same, and more, works without a terminal: the control socket answers
+.Xr bootbridgectl 1 ,
+which lists known peers, prints statistics, shows the frames that pass
+through, and changes these settings while
+.Nm
+runs.
 .Sh CONFIGURATION
 The configuration file is HCL, the format
 .Xr bootd.hcl 5
@@ -159,6 +185,19 @@ The network interface, as
 .It Ic stats No = Ar duration
 As
 .Fl stats .
+.It Ic ctl No = Ar string
+As
+.Fl ctl .
+.It Ic ctl_mode No = Ar string
+The socket's permissions as octal digits, e.g.
+.Dq 0600
+for root only; the default is
+.Dq 0660 ,
+so the group of the user running
+.Nm
+can query it.
+Any local user who can write the socket can see every frame bridged and
+change what is printed.
 .It Ic verbose No = Ar bool
 As
 .Fl v .
@@ -202,6 +241,10 @@ warns if anyone can read it.
 The configuration file the Debian and Ubuntu service uses.
 .It Pa /usr/local/etc/bootbridge.hcl
 The configuration file the macOS launch daemon uses.
+.It Pa /run/bootbridge/bootbridge.sock
+The control socket, when
+.Nm
+runs as root.
 .El
 .Sh EXIT STATUS
 .Nm
@@ -242,10 +285,17 @@ Connect QEMU on Linux to that L2TPv3 listener on 192.168.1.10:
     cookie64=on,txcookie=0x0123456789abcdef,\e
     rxcookie=0x0123456789abcdef,counter=on
 .Ed
+.Pp
+Watch the frames from another terminal while
+.Nm
+runs as a service:
+.Pp
+.Dl $ bootbridgectl dump -t 20
 .Sh SEE ALSO
 .Xr pcap 3PCAP ,
 .Xr bootd.hcl 5 ,
-.Xr bootd 8
+.Xr bootd 8 ,
+.Xr bootbridgectl 1
 .Sh STANDARDS
 .Rs
 .%R RFC 3931

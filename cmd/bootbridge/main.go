@@ -27,6 +27,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/rpajarola/gobootd/internal/bridge"
+	"github.com/rpajarola/gobootd/internal/control"
 	"github.com/rpajarola/gobootd/internal/link"
 	"github.com/rpajarola/gobootd/internal/version"
 )
@@ -91,6 +92,7 @@ func mainCmdWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 	fs.StringVar(&f.cookie, "cookie", "", "L2TPv3 cookie, 8 or 16 hex digits")
 	fs.BoolVar(&f.counter, "counter", d.counter, "L2TPv3 L2-specific sublayer with a sequence number")
 	fs.DurationVar(&f.stats, "stats", d.stats, "interval to log interface statistics (0 to disable)")
+	fs.StringVar(&f.ctl, "ctl", d.ctl, "control socket for bootbridgectl (\"\" for the default path, \"-\" for none)")
 	fs.BoolVar(&f.verbose, "v", false, "log every forwarding error")
 	fs.BoolVar(&f.print, "print", false, "print packets as they pass through the bridge")
 	fs.BoolVar(&f.print, "p", false, "alias for -print")
@@ -148,6 +150,8 @@ func mainCmdWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 			s.counter = f.counter
 		case "stats":
 			s.stats = f.stats
+		case "ctl":
+			s.ctl = f.ctl
 		case "v":
 			s.verbose = f.verbose
 		case "print", "p":
@@ -171,7 +175,7 @@ func mainCmdWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 		lvl = slog.LevelDebug
 	}
 	log := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: lvl}))
-	if err := run(o, stdin, stdout, log); err != nil {
+	if err := run(o, *config, stdin, stdout, log); err != nil {
 		fmt.Fprintf(stderr, "bootbridge: %v\n", err)
 		return 1
 	}
@@ -184,12 +188,14 @@ type options struct {
 	peers, l2tpPeers []netip.AddrPort
 	l2tpCfg          *link.L2TPv3
 	stats            time.Duration
+	ctl              string
+	ctlMode          os.FileMode
 	printPkts        bool
 	dumpPkts         bool
 	printIface       string
 }
 
-func run(o options, stdin io.Reader, stdout io.Writer, log *slog.Logger) error {
+func run(o options, configPath string, stdin io.Reader, stdout io.Writer, log *slog.Logger) error {
 	var raw, l2tp netip.AddrPort
 	var err error
 	if o.listen != "" {
@@ -256,6 +262,27 @@ func run(o options, stdin io.Reader, stdout io.Writer, log *slog.Logger) error {
 		DumpPackets:    o.dumpPkts,
 		PrintInterface: o.printIface,
 		PacketWriter:   stdout,
+	}
+	if o.ctl != "-" {
+		cs := control.New(b, control.Info{
+			Version:   version.String(),
+			PID:       os.Getpid(),
+			Config:    configPath,
+			Interface: o.iface,
+			MAC:       mac.String(),
+		})
+		cs.Mode = o.ctlMode
+		cs.Log = log
+		if err := cs.Listen(o.ctl); err != nil {
+			log.Warn("no control socket; run bootbridgectl with -socket or fix the path", "err", err)
+		} else {
+			log.Info("control socket", "path", cs.Addr())
+			go func() {
+				if err := cs.Run(ctx); err != nil && ctx.Err() == nil {
+					log.Warn("control socket", "err", err)
+				}
+			}()
+		}
 	}
 	if stdin != nil {
 		go handleKeyboard(ctx, stop, stdin, stdout, b, log)

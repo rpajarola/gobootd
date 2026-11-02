@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/netip"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 )
@@ -34,8 +35,11 @@ type UDP struct {
 	rejected map[netip.Addr]bool
 	static   []netip.AddrPort
 	learned  map[netip.AddrPort]time.Time
-	macs     map[[6]byte]netip.AddrPort
-	buf      []byte
+	// heard is when each configured peer was last heard from; learned
+	// peers have their own times.
+	heard map[netip.AddrPort]time.Time
+	macs  map[[6]byte]netip.AddrPort
+	buf   []byte
 }
 
 // peerTimeout is how long a learned peer keeps receiving frames after it
@@ -91,6 +95,7 @@ func ListenUDPConfig(addr netip.AddrPort, cfg UDPConfig) (*UDP, error) {
 		rejected: map[netip.Addr]bool{},
 		static:   cfg.Peers,
 		learned:  map[netip.AddrPort]time.Time{},
+		heard:    map[netip.AddrPort]time.Time{},
 		macs:     map[[6]byte]netip.AddrPort{},
 		buf:      make([]byte, 65536),
 	}
@@ -139,6 +144,80 @@ func (u *UDP) reject(from netip.AddrPort) {
 	}
 }
 
+// PeerState describes one UDP peer of a transport.
+type PeerState struct {
+	Addr netip.AddrPort
+	// Static peers are configured; they always receive frames.
+	Static bool
+	// LastSeen is when a frame was last received from the peer, zero if
+	// never. A learned peer that has not been heard from for
+	// peerTimeout is dropped.
+	LastSeen time.Time
+}
+
+// MACEntry is a learned Ethernet address and the peer it was last heard
+// from.
+type MACEntry struct {
+	MAC      net.HardwareAddr
+	Addr     netip.AddrPort
+	LastSeen time.Time
+}
+
+// PeersSnapshot returns the transport's configured and learned peers,
+// dropping the learned ones that have timed out.
+func (u *UDP) PeersSnapshot() []PeerState {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	now := time.Now()
+	for p, t := range u.learned {
+		if now.Sub(t) > peerTimeout {
+			delete(u.learned, p)
+			for m, mp := range u.macs {
+				if mp == p {
+					delete(u.macs, m)
+				}
+			}
+		}
+	}
+	out := make([]PeerState, 0, len(u.static)+len(u.learned))
+	for _, p := range u.static {
+		out = append(out, PeerState{Addr: p, Static: true, LastSeen: u.heard[p]})
+	}
+	for p, t := range u.learned {
+		if !slices.Contains(u.static, p) {
+			out = append(out, PeerState{Addr: p, LastSeen: t})
+		}
+	}
+	slices.SortFunc(out, func(a, b PeerState) int { return strings.Compare(a.Addr.String(), b.Addr.String()) })
+	return out
+}
+
+// MACsSnapshot returns the MAC addresses the transport has learned and the
+// peer each was last heard from.
+func (u *UDP) MACsSnapshot() []MACEntry {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	out := make([]MACEntry, 0, len(u.macs))
+	for m, p := range u.macs {
+		seen := u.heard[p]
+		if t, ok := u.learned[p]; ok && t.After(seen) {
+			seen = t
+		}
+		out = append(out, MACEntry{MAC: net.HardwareAddr(m[:]), Addr: p, LastSeen: seen})
+	}
+	slices.SortFunc(out, func(a, b MACEntry) int { return strings.Compare(a.MAC.String(), b.MAC.String()) })
+	return out
+}
+
+// Encapsulation returns "l2tpv3" or "raw", how frames travel over the
+// datagrams.
+func (u *UDP) Encapsulation() string {
+	if u.l2tp != nil {
+		return "l2tpv3"
+	}
+	return "raw"
+}
+
 // Addr returns the local address.
 func (u *UDP) Addr() netip.AddrPort { return u.conn.LocalAddr().(*net.UDPAddr).AddrPort() }
 
@@ -181,6 +260,8 @@ func (u *UDP) ReadFrameFrom(ctx context.Context) ([]byte, netip.AddrPort, error)
 		u.mu.Lock()
 		if !slices.Contains(u.static, from) {
 			u.learned[from] = time.Now()
+		} else {
+			u.heard[from] = time.Now()
 		}
 		if src := [6]byte(frame[6:12]); src[0]&1 == 0 {
 			u.macs[src] = from

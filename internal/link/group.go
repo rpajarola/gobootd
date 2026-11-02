@@ -50,6 +50,28 @@ func NewGroup(members ...*UDP) *Group {
 // Members returns the transports in the group.
 func (g *Group) Members() []*UDP { return g.members }
 
+// TransportState describes one UDP transport of a group.
+type TransportState struct {
+	Name          string
+	Encapsulation string
+	Peers         []PeerState
+	MACs          []MACEntry
+}
+
+// TransportSnapshots returns the peer state of each member of the group.
+func (g *Group) TransportSnapshots() []TransportState {
+	out := make([]TransportState, 0, len(g.members))
+	for _, u := range g.members {
+		out = append(out, TransportState{
+			Name:          u.Interface().Name,
+			Encapsulation: u.Encapsulation(),
+			Peers:         u.PeersSnapshot(),
+			MACs:          u.MACsSnapshot(),
+		})
+	}
+	return out
+}
+
 // Interface implements Port.
 func (g *Group) Interface() *Interface { return g.info }
 

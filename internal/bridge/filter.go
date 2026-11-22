@@ -173,22 +173,31 @@ func (f Filter) Transport(name string) bool {
 // AllTransports reports whether the filter shows the whole UDP side.
 func (f Filter) AllTransports() bool { return f.UDP && f.Transports == nil }
 
-// UDP ports of discovery protocols that modern machines broadcast or
-// multicast all the time, and that no boot client speaks.
-var noisePorts = []uint16{
-	1900,  // SSDP
-	3702,  // WS-Discovery
-	5353,  // mDNS
-	5355,  // LLMNR
-	17500, // Dropbox LAN sync
+// bootPorts are the UDP ports boot clients broadcast to: BOOTP and DHCP,
+// TFTP, portmap (for CALLIT, which bootparam and NIS clients broadcast
+// through) and PXE. A broadcast to any other port is noise.
+var bootPorts = []uint16{67, 68, 69, 111, 4011}
+
+// noiseTypes are EtherTypes of modern link management that no boot
+// client speaks.
+var noiseTypes = []uint16{
+	0x86dd, // IPv6
+	0x88cc, // LLDP
+	0x88e1, // HomePlug AV
+	0x8912, // HomePlug (Mediaxtream)
+	0x893a, // IEEE 1905.1
+	0x8899, // Realtek RRCP
 }
 
 // lanNoise reports whether a frame from the LAN has nothing to do with
-// the UDP side: IPv6, link-layer control (spanning tree, LLDP, CDP),
-// IGMP, the discovery protocols in noisePorts, and ARP that is not about
-// a host on the UDP side. Frames to a host on the UDP side are never
-// noise, and neither is anything else: boot clients use all kinds of
-// broadcasts, and a request nobody answers is the one to see.
+// the UDP side: IPv6, link-layer control (spanning tree, LLDP, CDP,
+// powerline), anything to an IPv4 multicast address (IGMP, mDNS, SSDP and
+// the like: boot clients do not multicast), UDP broadcasts to ports that
+// are not in bootPorts (the discovery of Syncthing, Plex, Ubiquiti,
+// NetBIOS...), and ARP that is not about a host on the UDP side. Frames to
+// a host on the UDP side are never noise, and neither is anything else,
+// such as RARP, MOP, DECnet, AppleTalk or IPX: a request nobody answers is
+// the one to see.
 func (b *Bridge) lanNoise(frame []byte) bool {
 	if len(frame) < 14 {
 		return false
@@ -206,31 +215,30 @@ func (b *Bridge) lanNoise(frame []byte) bool {
 		return true // IEEE 802.1 link-local: STP, LLDP, LACP, 802.1X
 	case dst == [6]byte{0x01, 0x00, 0x0c, 0xcc, 0xcc, 0xcc}:
 		return true // CDP, VTP
-	case typ == 0x86dd || typ == 0x88cc:
-		return true // IPv6, LLDP
+	case slices.Contains(noiseTypes, typ):
+		return true
 	case typ == 0x0806:
 		return !b.arpAboutUDP(frame[14:])
 	case typ == 0x0800:
-		return ipv4Noise(frame[14:])
+		return ipv4Noise(frame[14:], dst[0]&1 != 0)
 	}
 	return false
 }
 
-func ipv4Noise(p []byte) bool {
+// ipv4Noise reports whether an IPv4 packet sent to a group Ethernet
+// address (broadcast or multicast) or not is noise.
+func ipv4Noise(p []byte, group bool) bool {
 	if len(p) < 20 || p[0]>>4 != 4 {
 		return false
 	}
-	hl := int(p[0]&0xf) * 4
-	switch p[9] {
-	case 2:
-		return true // IGMP
-	case 17:
-		if len(p) < hl+4 || binary.BigEndian.Uint16(p[6:8])&0x1fff != 0 {
-			return false
-		}
-		return slices.Contains(noisePorts, binary.BigEndian.Uint16(p[hl+2:hl+4]))
+	if netip.AddrFrom4([4]byte(p[16:20])).IsMulticast() {
+		return true
 	}
-	return false
+	hl := int(p[0]&0xf) * 4
+	if !group || p[9] != 17 || len(p) < hl+4 || binary.BigEndian.Uint16(p[6:8])&0x1fff != 0 {
+		return false
+	}
+	return !slices.Contains(bootPorts, binary.BigEndian.Uint16(p[hl+2:hl+4]))
 }
 
 // arpAboutUDP reports whether an ARP packet's sender or target is a host

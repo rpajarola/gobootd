@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"net"
 	"net/netip"
 	"slices"
@@ -136,7 +137,17 @@ func TestLANNoise(t *testing.T) {
 	}{
 		{"BOOTP request", ipv4UDP(link.Broadcast, bcast, 67), false},
 		{"portmap CALLIT", ipv4UDP(link.Broadcast, bcast, 111), false},
-		{"NetBIOS", ipv4UDP(link.Broadcast, bcast, 137), false},
+		{"TFTP", ipv4UDP(link.Broadcast, bcast, 69), false},
+		{"PXE", ipv4UDP(link.Broadcast, bcast, 4011), false},
+		{"NetBIOS", ipv4UDP(link.Broadcast, netip.MustParseAddr("10.3.0.255"), 137), true},
+		{"Syncthing", ipv4UDP(link.Broadcast, netip.MustParseAddr("10.3.0.255"), 21027), true},
+		{"Ubiquiti", ipv4UDP(link.Broadcast, bcast, 10001), true},
+		{"Ubiquiti multicast", ipv4UDP(mac("01:00:5e:59:bc:01"), netip.MustParseAddr("233.89.188.1"), 10001), true},
+		{"Plex GDM", ipv4UDP(link.Broadcast, netip.MustParseAddr("192.168.86.255"), 32414), true},
+		{"multicast 48000", ipv4UDP(mac("01:00:5e:7e:7f:3f"), netip.MustParseAddr("239.254.127.63"), 48000), true},
+		{"unicast to another host", ipv4UDP(mac("08:00:20:00:00:0a"), netip.MustParseAddr("10.3.0.9"), 21027), false},
+		{"AppleTalk", link.Build(mac("09:00:07:ff:ff:ff"), mac("08:00:07:00:00:09"), 0x809b, nil), false},
+		{"IEEE 1905", link.Build(mac("01:80:c2:00:00:13"), mac("08:00:20:00:00:09"), 0x893a, nil), true},
 		{"RARP", link.Build(link.Broadcast, mac("08:00:20:00:00:09"), link.TypeRARP, make([]byte, 28)), false},
 		{"MOP", link.Build(mac("ab:00:00:01:00:00"), mac("08:00:2b:00:00:09"), 0x6001, nil), false},
 		{"mDNS", ipv4UDP(mac("01:00:5e:00:00:fb"), netip.MustParseAddr("224.0.0.251"), 5353), true},
@@ -160,5 +171,29 @@ func TestLANNoise(t *testing.T) {
 	}
 	if f, _ := b.ParseFilter("all", ForFrames); !f.Frame(FrameEvent{Interface: "en0", Noise: true}, "en0") {
 		t.Error("all hides noise")
+	}
+}
+
+// TestLANNoiseCaptured: frames from a real LAN that auto showed.
+func TestLANNoiseCaptured(t *testing.T) {
+	b, _, _ := filterBridge(t)
+	for _, h := range []string{
+		// Syncthing local discovery to 10.3.0.255:21027 (truncated)
+		"ffffffffffff6a7a0cf2044f08004500016a2edd40004011f59e0a0300030a0300ff875c52230156dfde2ea7d90b0a20f572",
+		// Ubiquiti discovery, multicast and broadcast
+		"01005e59bc011c0b8b161db5080045000020236b40000111a7030a030001e959bc01ed972711000c3ace010000000000000000000000000000000000",
+		"ffffffffffff1c0b8b161db50800450000205d3240004011d3970a030001ffffffffed972711000ce029010000000000000000000000000000000000",
+		// Plex GDM M-SEARCH to 192.168.86.255:32412
+		"ffffffffffff6a7a0cf2044f080045000031521140004011ba59c0a85601c0a856ffb35b7e9c001d292c4d2d534541524348202a20485454502f312e310d0a",
+		// to 239.254.127.63:48000
+		"01005e7e7f3f847848fa9d600800450000744a4f40004011764a0a0300a7effe7f3fbb80bb80006072d1223344550202",
+	} {
+		frame, err := hex.DecodeString(h)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !b.lanNoise(link.Pad(frame)) {
+			t.Errorf("not noise: %s", h[:60])
+		}
 	}
 }

@@ -132,11 +132,15 @@ take one of these, in any case:
 .Bl -tag -width "transport" -offset indent
 .It Cm auto
 Every frame but LAN traffic that has nothing to do with the UDP side:
-IPv6, spanning tree, LLDP and CDP, IGMP, mDNS, SSDP, LLMNR, WS-Discovery
-and Dropbox LAN sync, ARP that is not about a host on the UDP side, and
-frames that stay on the LAN.
-Frames to a host on the UDP side are always shown, and so is every other
-broadcast, so a boot request that nobody answers is seen too.
+IPv6, spanning tree, LLDP, CDP and powerline management, anything to an
+IPv4 multicast address (IGMP, mDNS, SSDP and the like), UDP broadcasts
+to any port but BOOTP and DHCP (67, 68), TFTP (69), portmap (111) and PXE
+(4011), which is where the discovery of Syncthing, Plex, Ubiquiti or
+NetBIOS goes, ARP that is not about a host on the UDP side, and frames
+that stay on the LAN.
+Frames to a host on the UDP side are always shown, and so are the
+broadcasts of other protocols, such as RARP, MOP, DECnet, AppleTalk and
+IPX, so a boot request that nobody answers is seen too.
 The default for
 .Cm log ,
 .Cm dump

@@ -143,8 +143,9 @@ commands:
                          how to connect QEMU or simh to them
 
 -i and -iface take all; auto, which is all but LAN traffic that has
-nothing to do with the UDP side (IPv6, spanning tree and LLDP, mDNS, SSDP
-and the like, and ARP about other hosts); lan or udp, the sides, also by
+nothing to do with the UDP side (IPv6, spanning tree and LLDP, IP
+multicast, UDP broadcasts to ports other than BOOTP, TFTP, portmap and
+PXE, and ARP about other hosts); lan or udp, the sides, also by
 their names; and with peers, a transport by name, any unique part of it,
 or l2tp or raw. A - or ! in front means everything else: -i -lan. The
 default is auto for frames and all for peers.
@@ -329,6 +330,7 @@ func (c *client) print(v map[string]json.RawMessage, o opts) error {
 		if o.hexdump {
 			fmt.Fprint(c.w, hex.Dump(frame))
 		}
+		return nil
 	case v["uptime"] != nil:
 		return printStatus(c.w, full)
 	case v["transports"] != nil:

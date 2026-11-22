@@ -9,12 +9,15 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"os/signal"
+	"os/user"
+	"strconv"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -47,7 +50,7 @@ func mainCmd(args []string, stdout, stderr io.Writer) int {
 	name := args[0]
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	socket := fs.String("socket", "", "control socket path (default: $BOOTBRIDGE_CTL_SOCKET or the socket of the running bootbridge)")
+	socket := fs.String("socket", "", "control socket path (default: $BOOTBRIDGE_CTL_SOCKET, or the system bridge's socket, then your own)")
 	asJSON := fs.Bool("json", false, "print the server's JSON lines unchanged")
 	var o opts
 	switch name {
@@ -128,7 +131,8 @@ default is /run/bootbridge/bootbridge.sock when bootbridge runs as root
 (/var/run where there is no /run), and a per-user socket in
 $XDG_RUNTIME_DIR or /tmp otherwise. Several bridges on one machine need
 explicit -ctl and -socket paths; bootbridge logs the path it listens on.
-$BOOTBRIDGE_CTL_SOCKET overrides where bootbridgectl looks.
+Without -socket or $BOOTBRIDGE_CTL_SOCKET, bootbridgectl tries the system
+bridge's socket first, as any user, then the user's own.
 `)
 }
 
@@ -143,14 +147,42 @@ func (c *client) dial() (net.Conn, error) {
 	if path == "" {
 		path = os.Getenv("BOOTBRIDGE_CTL_SOCKET")
 	}
+	paths := []string{path}
 	if path == "" {
-		path = control.DefaultPath(os.Getuid())
+		paths = control.ClientPaths(os.Getuid())
 	}
-	conn, err := net.Dial("unix", path)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w (is bootbridge running with -ctl?)", path, err)
+	return dialFirst(paths)
+}
+
+// dialFirst connects to the first socket of paths that answers. A socket
+// that is missing, or left behind by a bridge that stopped, is skipped;
+// any other error, such as not being allowed to use it, is the one
+// reported, since it is the bridge that is running.
+func dialFirst(paths []string) (net.Conn, error) {
+	var first error
+	for _, p := range paths {
+		conn, err := net.Dial("unix", p)
+		if err == nil {
+			return conn, nil
+		}
+		err = fmt.Errorf("%s: %w", p, err)
+		if errors.Is(err, os.ErrPermission) {
+			if g := socketGroup(p); g != "" {
+				err = fmt.Errorf("%w (members of group %s may use it)", err, g)
+			}
+			return nil, err
+		}
+		if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, syscall.ECONNREFUSED) {
+			return nil, err
+		}
+		if first == nil {
+			first = err
+		}
 	}
-	return conn, nil
+	if len(paths) > 1 {
+		return nil, fmt.Errorf("no bridge at %s (is bootbridge running with -ctl?)", strings.Join(paths, " or "))
+	}
+	return nil, fmt.Errorf("%w (is bootbridge running with -ctl?)", first)
 }
 
 // run sends one request and prints the responses; with streaming methods
@@ -457,4 +489,21 @@ func parseOnOff(s string) (*bool, error) {
 		return &f, nil
 	}
 	return nil, fmt.Errorf("%q is not on or off", s)
+}
+
+// socketGroup returns the name of the group that owns path, or "".
+func socketGroup(path string) string {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return ""
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return ""
+	}
+	g, err := user.LookupGroupId(strconv.FormatUint(uint64(st.Gid), 10))
+	if err != nil {
+		return ""
+	}
+	return g.Name
 }

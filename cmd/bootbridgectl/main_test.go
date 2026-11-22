@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net"
 	"net/netip"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -166,5 +168,54 @@ func TestNotRunning(t *testing.T) {
 	}
 	if !strings.Contains(errb.String(), "is bootbridge running") {
 		t.Errorf("stderr %q", errb.String())
+	}
+}
+
+func TestDialFirst(t *testing.T) {
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "missing.sock")
+	// A socket file whose bridge has stopped refuses connections.
+	stale := filepath.Join(dir, "stale.sock")
+	l, err := net.Listen("unix", stale)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.(*net.UnixListener).SetUnlinkOnClose(false)
+	l.Close()
+	live := filepath.Join(dir, "live.sock")
+	ll, err := net.Listen("unix", live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ll.Close()
+
+	conn, err := dialFirst([]string{missing, stale, live})
+	if err != nil {
+		t.Fatalf("missing and stale sockets not skipped: %v", err)
+	}
+	conn.Close()
+
+	_, err = dialFirst([]string{missing, stale})
+	if err == nil || !strings.Contains(err.Error(), "no bridge at "+missing+" or "+stale) {
+		t.Errorf("error %v", err)
+	}
+
+	// A bridge the user may not use is reported, not skipped.
+	if os.Getuid() != 0 {
+		os.Chmod(live, 0)
+		_, err = dialFirst([]string{live, missing})
+		if !errors.Is(err, os.ErrPermission) || !strings.Contains(err.Error(), live) {
+			t.Errorf("permission error %v", err)
+		}
+	}
+}
+
+func TestClientPaths(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", "/run/user/1000")
+	if got := control.ClientPaths(1000); len(got) != 2 || got[0] != control.SystemPath() || got[1] != "/run/user/1000/bootbridge/bootbridge.sock" {
+		t.Errorf("user: %v", got)
+	}
+	if got := control.ClientPaths(0); len(got) != 1 || got[0] != control.SystemPath() {
+		t.Errorf("root: %v", got)
 	}
 }

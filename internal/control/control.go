@@ -31,12 +31,30 @@ import (
 // and -socket paths; bootbridge always logs the path it uses.
 func DefaultPath(uid int) string {
 	if uid == 0 {
-		return filepath.Join(runtimeDir(), "bootbridge", "bootbridge.sock")
+		return SystemPath()
 	}
 	if dir := os.Getenv("XDG_RUNTIME_DIR"); dir != "" {
 		return filepath.Join(dir, "bootbridge", "bootbridge.sock")
 	}
 	return filepath.Join(os.TempDir(), "bootbridge-"+strconv.Itoa(uid), "bootbridge.sock")
+}
+
+// SystemPath is the socket of a bridge running as root or as a system
+// service: /run/bootbridge/bootbridge.sock, or /var/run where there is no
+// /run.
+func SystemPath() string {
+	return filepath.Join(runtimeDir(), "bootbridge", "bootbridge.sock")
+}
+
+// ClientPaths returns the sockets bootbridgectl tries, in order, when it
+// is given none: the system bridge's first, since that is the usual one
+// and users in its group may use it, then the user's own bridge's.
+func ClientPaths(uid int) []string {
+	paths := []string{SystemPath()}
+	if p := DefaultPath(uid); p != paths[0] {
+		paths = append(paths, p)
+	}
+	return paths
 }
 
 // runtimeDir is where daemons keep their run-time files: /run on Linux,

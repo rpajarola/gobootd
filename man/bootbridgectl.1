@@ -45,6 +45,12 @@ logged when it started.
 is the default when no
 .Fl socket
 is given.
+Without either,
+.Nm
+tries the system bridge's socket first, whoever runs it, so that members
+of the socket's group can use it, then the user's own.
+A socket that is missing or left behind by a stopped bridge is skipped;
+one the user may not open is reported, with the group that may.
 Anyone who can write the socket sees every frame bridged and can change
 what is printed.
 .Pp

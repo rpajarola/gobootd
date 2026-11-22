@@ -97,8 +97,9 @@ func readLine(t *testing.T, c net.Conn) map[string]json.RawMessage {
 }
 
 func TestDefaultPath(t *testing.T) {
-	if got := DefaultPath(0); got != "/run/bootbridge/bootbridge.sock" {
-		t.Errorf("root: %s", got)
+	// /run where there is one, /var/run on macOS.
+	if got, want := DefaultPath(0), runtimeDir()+"/bootbridge/bootbridge.sock"; got != want {
+		t.Errorf("root: %s, want %s", got, want)
 	}
 	t.Setenv("XDG_RUNTIME_DIR", "/run/user/1000")
 	if got := DefaultPath(1000); got != "/run/user/1000/bootbridge/bootbridge.sock" {

@@ -61,17 +61,87 @@ func (l *L2TPv3) encode(b []byte, seq uint32) []byte {
 	return b
 }
 
-// decode returns the frame in a datagram, or false if it is not a data
-// message for this session with the right cookie.
-func (l *L2TPv3) decode(b []byte) ([]byte, bool) {
+// setSeq sets the sequence number in a datagram encode made.
+func (l *L2TPv3) setSeq(dg []byte, seq uint32) {
+	if l.Counter {
+		n := l.headerLen()
+		binary.BigEndian.PutUint32(dg[n-4:n], 0x40000000|seq&0xffffff)
+	}
+}
+
+// rejectReason says why a datagram was dropped.
+type rejectReason int
+
+const (
+	accepted rejectReason = iota
+	// rejectShort: too short for the header and an Ethernet header.
+	rejectShort
+	// rejectHeader: a control message or another L2TP version.
+	rejectHeader
+	rejectSession
+	rejectCookie
+)
+
+func (r rejectReason) String() string {
+	switch r {
+	case rejectShort:
+		return "too short"
+	case rejectHeader:
+		return "not an L2TPv3 data message"
+	case rejectSession:
+		return "wrong session"
+	case rejectCookie:
+		return "wrong cookie"
+	}
+	return "accepted"
+}
+
+// decode returns the frame in a datagram, and its sequence number if the
+// sender numbers them, or why it is not a data message for this session
+// with the right cookie.
+func (l *L2TPv3) decode(b []byte) (frame []byte, seq uint32, hasSeq bool, why rejectReason) {
 	n := l.headerLen()
 	if len(b) < n+HeaderLen {
-		return nil, false
+		return nil, 0, false, rejectShort
 	}
-	if binary.BigEndian.Uint32(b[0:4])&0x800f0000 != l2tpData ||
-		binary.BigEndian.Uint32(b[4:8]) != l.Session ||
-		subtle.ConstantTimeCompare(b[8:8+len(l.Cookie)], l.Cookie) != 1 {
-		return nil, false
+	switch {
+	case binary.BigEndian.Uint32(b[0:4])&0x800f0000 != l2tpData:
+		return nil, 0, false, rejectHeader
+	case binary.BigEndian.Uint32(b[4:8]) != l.Session:
+		return nil, 0, false, rejectSession
+	case subtle.ConstantTimeCompare(b[8:8+len(l.Cookie)], l.Cookie) != 1:
+		return nil, 0, false, rejectCookie
 	}
-	return b[n:], true
+	if l.Counter {
+		// The default L2-specific sublayer: S bit, then 24 bits of
+		// sequence number. Without the S bit, the sender does not
+		// number its frames.
+		w := binary.BigEndian.Uint32(b[n-4 : n])
+		seq, hasSeq = w&0xffffff, w&0x40000000 != 0
+	}
+	return b[n:], seq, hasSeq, accepted
+}
+
+// seqWindow is how far behind the expected sequence number a frame may
+// be and still count as late; a frame further back means the peer started
+// over, e.g. after a restart.
+const seqWindow = 1024
+
+// seqCheck compares a received sequence number with the expected one and
+// returns how many frames were skipped, whether this one is late (out of
+// order or a duplicate), and the next expected number.
+func seqCheck(expect, seq uint32) (lost uint32, late, restart bool, next uint32) {
+	const mod = 1 << 24
+	switch d := (seq - expect) % mod; {
+	case d == 0:
+		return 0, false, false, (seq + 1) % mod
+	case d < mod-seqWindow:
+		if d >= mod/2 {
+			// Far behind: the peer started over.
+			return 0, false, true, (seq + 1) % mod
+		}
+		return d, false, false, (seq + 1) % mod
+	default:
+		return 0, true, false, expect
+	}
 }

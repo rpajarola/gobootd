@@ -56,6 +56,7 @@ type TransportState struct {
 	Encapsulation string
 	Peers         []PeerState
 	MACs          []MACEntry
+	RxErrors      RxErrors
 }
 
 // TransportSnapshots returns the peer state of each member of the group.
@@ -67,6 +68,7 @@ func (g *Group) TransportSnapshots() []TransportState {
 			Encapsulation: u.Encapsulation(),
 			Peers:         u.PeersSnapshot(),
 			MACs:          u.MACsSnapshot(),
+			RxErrors:      u.RxErrors(),
 		})
 	}
 	return out

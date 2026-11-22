@@ -155,6 +155,7 @@ func (b *Bridge) UDPPeers() []link.TransportState {
 			Encapsulation: u.Encapsulation(),
 			Peers:         u.PeersSnapshot(),
 			MACs:          u.MACsSnapshot(),
+			RxErrors:      u.RxErrors(),
 		}}
 	case *link.Group:
 		return u.TransportSnapshots()

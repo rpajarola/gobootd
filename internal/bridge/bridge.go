@@ -93,6 +93,8 @@ type Bridge struct {
 	udp      map[[6]byte]time.Time
 	lanStats ifStats
 	udpStats ifStats
+	// rxErrors are the transport receive errors last logged.
+	rxErrors map[string]link.RxErrors
 	// subs receive copies of the frames that pass, for watch and tail.
 	subs []*subscriber
 	// ring holds the last ringSize forwarded frames.
@@ -332,6 +334,31 @@ func (b *Bridge) LogStats() {
 	b.mu.Unlock()
 	b.logInterface(b.LANStats())
 	b.logInterface(b.UDPStats())
+	for _, t := range b.UDPPeers() {
+		b.logRxErrors(t)
+	}
+}
+
+// logRxErrors logs a transport's receive errors when they changed since
+// the last time.
+func (b *Bridge) logRxErrors(t link.TransportState) {
+	b.mu.Lock()
+	if b.rxErrors == nil {
+		b.rxErrors = map[string]link.RxErrors{}
+	}
+	changed := b.rxErrors[t.Name] != t.RxErrors
+	b.rxErrors[t.Name] = t.RxErrors
+	b.mu.Unlock()
+	if !changed {
+		return
+	}
+	e := t.RxErrors
+	attrs := []any{"transport", t.Name, "dropped", e.Dropped(), "short", e.Short}
+	if t.Encapsulation == "l2tpv3" {
+		attrs = append(attrs, "bad_header", e.BadHeader, "session", e.Session, "cookie", e.Cookie,
+			"seq_lost", e.SeqLost, "seq_late", e.SeqLate, "seq_restart", e.SeqRestart)
+	}
+	b.logger().Warn("transport receive errors", attrs...)
 }
 
 func (b *Bridge) logInterface(s InterfaceStats) {

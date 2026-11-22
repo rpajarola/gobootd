@@ -59,6 +59,12 @@ and QEMU
 speak it.
 Datagrams with the wrong session or cookie are dropped, so the cookie
 keeps out anyone who does not know it.
+The first one from each address is logged, and
+.Xr bootbridgectl 1
+.Cm stats
+counts them all by reason, along with gaps and reordering in the
+sequence numbers of the frames accepted.
+Each peer gets its own sequence numbers.
 It is sent in clear, which is no protection against anyone who can see
 the traffic.
 .El
@@ -108,6 +114,7 @@ How often to log interface statistics, such as
 (the default) or
 .Li 5m ;
 0 disables them.
+A transport's receive errors are logged with them whenever they changed.
 .It Fl ctl Ar path
 The Unix socket
 .Xr bootbridgectl 1

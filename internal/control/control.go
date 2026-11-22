@@ -410,9 +410,38 @@ func (s *Server) stats(w io.Writer, watch bool) error {
 	}
 }
 
+// rxErrorsJSON are a transport's receive errors. The L2TPv3 counters are
+// left out for raw transports.
+type rxErrorsJSON struct {
+	Name          string  `json:"name"`
+	Encapsulation string  `json:"encapsulation"`
+	Dropped       uint64  `json:"dropped"`
+	Short         uint64  `json:"short"`
+	BadHeader     *uint64 `json:"bad_header,omitempty"`
+	Session       *uint64 `json:"session,omitempty"`
+	Cookie        *uint64 `json:"cookie,omitempty"`
+	SeqLost       *uint64 `json:"seq_lost,omitempty"`
+	SeqLate       *uint64 `json:"seq_late,omitempty"`
+	SeqRestart    *uint64 `json:"seq_restart,omitempty"`
+}
+
+func rxErrorsOf(t link.TransportState) rxErrorsJSON {
+	e := t.RxErrors
+	out := rxErrorsJSON{Name: t.Name, Encapsulation: t.Encapsulation, Dropped: e.Dropped(), Short: e.Short}
+	if t.Encapsulation == "l2tpv3" {
+		out.BadHeader, out.Session, out.Cookie = &e.BadHeader, &e.Session, &e.Cookie
+		out.SeqLost, out.SeqLate, out.SeqRestart = &e.SeqLost, &e.SeqLate, &e.SeqRestart
+	}
+	return out
+}
+
 func (s *Server) statsSnapshot() map[string]any {
 	b := s.Bridge
-	return map[string]any{"time": time.Now().Format(time.RFC3339), "lan": statsOf(b.LANStats()), "udp": statsOf(b.UDPStats())}
+	ts := []rxErrorsJSON{}
+	for _, t := range b.UDPPeers() {
+		ts = append(ts, rxErrorsOf(t))
+	}
+	return map[string]any{"time": time.Now().Format(time.RFC3339), "lan": statsOf(b.LANStats()), "udp": statsOf(b.UDPStats()), "transport_errors": ts}
 }
 
 func (s *Server) set(w io.Writer, a Args) error {

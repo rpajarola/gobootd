@@ -30,11 +30,16 @@ type UDP struct {
 	log  *slog.Logger
 	done chan struct{}
 
-	mu       sync.Mutex
-	seq      uint32
+	mu sync.Mutex
+	// seq is the last sequence number sent to each peer: an L2TPv3
+	// session is point to point, so each peer gets its own numbers.
+	seq      map[netip.AddrPort]uint32
 	rejected map[netip.Addr]bool
-	static   []netip.AddrPort
-	learned  map[netip.AddrPort]time.Time
+	errs     RxErrors
+	// expect is the next sequence number expected from each peer.
+	expect  map[netip.AddrPort]uint32
+	static  []netip.AddrPort
+	learned map[netip.AddrPort]time.Time
 	// heard is when each configured peer was last heard from; learned
 	// peers have their own times.
 	heard map[netip.AddrPort]time.Time
@@ -67,7 +72,7 @@ type UDPConfig struct {
 	// them and drop them.
 	KeepaliveMAC net.HardwareAddr
 	// Log, if set, gets a warning for the first rejected datagram from
-	// each address.
+	// each address. RxErrors counts them all.
 	Log *slog.Logger
 }
 
@@ -93,6 +98,8 @@ func ListenUDPConfig(addr netip.AddrPort, cfg UDPConfig) (*UDP, error) {
 		log:      cfg.Log,
 		done:     make(chan struct{}),
 		rejected: map[netip.Addr]bool{},
+		expect:   map[netip.AddrPort]uint32{},
+		seq:      map[netip.AddrPort]uint32{},
 		static:   cfg.Peers,
 		learned:  map[netip.AddrPort]time.Time{},
 		heard:    map[netip.AddrPort]time.Time{},
@@ -131,17 +138,89 @@ func (u *UDP) keepalive(mac net.HardwareAddr) {
 	}
 }
 
-// reject notes a datagram that failed the L2TPv3 checks.
-func (u *UDP) reject(from netip.AddrPort) {
+// RxErrors counts the datagrams a transport dropped, and the sequence
+// errors of the L2TPv3 frames it accepted.
+type RxErrors struct {
+	// Short datagrams cannot hold an Ethernet header (after the L2TPv3
+	// header, if any).
+	Short uint64
+	// BadHeader are L2TP control messages and other versions.
+	BadHeader uint64
+	// Session and Cookie are datagrams for another L2TPv3 session or
+	// with the wrong cookie.
+	Session, Cookie uint64
+	// SeqLost is how many sequence numbers were skipped: frames lost
+	// on the way, or still to come out of order.
+	SeqLost uint64
+	// SeqLate are frames that arrived after a later one: reordered or
+	// duplicated. They are delivered.
+	SeqLate uint64
+	// SeqRestart counts peers that started over with their sequence
+	// numbers, e.g. after a restart.
+	SeqRestart uint64
+}
+
+// Dropped returns the number of datagrams dropped.
+func (e RxErrors) Dropped() uint64 { return e.Short + e.BadHeader + e.Session + e.Cookie }
+
+// RxErrors returns the transport's receive error counters.
+func (u *UDP) RxErrors() RxErrors {
 	u.mu.Lock()
-	first := !u.rejected[from.Addr()] && len(u.rejected) < 256
+	defer u.mu.Unlock()
+	return u.errs
+}
+
+// reject notes a datagram that was dropped.
+func (u *UDP) reject(from netip.AddrPort, why rejectReason) {
+	u.mu.Lock()
+	switch why {
+	case rejectShort:
+		u.errs.Short++
+	case rejectHeader:
+		u.errs.BadHeader++
+	case rejectSession:
+		u.errs.Session++
+	case rejectCookie:
+		u.errs.Cookie++
+	}
+	// Short datagrams on a raw transport are not worth a warning:
+	// HECnet bridges and emulators send no such thing.
+	first := u.l2tp != nil && !u.rejected[from.Addr()] && len(u.rejected) < 256
 	if first {
 		u.rejected[from.Addr()] = true
 	}
 	u.mu.Unlock()
 	if first && u.log != nil {
-		u.log.Warn("dropping datagrams with the wrong L2TPv3 session or cookie", "transport", u.info.Name, "from", from.String())
+		u.log.Warn("dropping L2TPv3 datagrams that fail the checks; bootbridgectl stats counts them",
+			"transport", u.info.Name, "from", from.String(), "reason", why.String())
 	}
+}
+
+// forget drops a learned peer that timed out. It is called with u.mu
+// held.
+func (u *UDP) forget(p netip.AddrPort) {
+	delete(u.learned, p)
+	delete(u.expect, p)
+	delete(u.seq, p)
+}
+
+// sequence checks the sequence number of a frame from a peer. It is
+// called with u.mu held.
+func (u *UDP) sequence(from netip.AddrPort, seq uint32) {
+	expect, ok := u.expect[from]
+	if !ok {
+		u.expect[from] = (seq + 1) % (1 << 24)
+		return
+	}
+	lost, late, restart, next := seqCheck(expect, seq)
+	u.errs.SeqLost += uint64(lost)
+	if late {
+		u.errs.SeqLate++
+	}
+	if restart {
+		u.errs.SeqRestart++
+	}
+	u.expect[from] = next
 }
 
 // PeerState describes one UDP peer of a transport.
@@ -171,7 +250,7 @@ func (u *UDP) PeersSnapshot() []PeerState {
 	now := time.Now()
 	for p, t := range u.learned {
 		if now.Sub(t) > peerTimeout {
-			delete(u.learned, p)
+			u.forget(p)
 			for m, mp := range u.macs {
 				if mp == p {
 					delete(u.macs, m)
@@ -247,17 +326,23 @@ func (u *UDP) ReadFrameFrom(ctx context.Context) ([]byte, netip.AddrPort, error)
 		}
 		from = netip.AddrPortFrom(from.Addr().Unmap(), from.Port())
 		frame := u.buf[:n]
+		var seq uint32
+		var hasSeq bool
 		if u.l2tp != nil {
-			var ok bool
-			if frame, ok = u.l2tp.decode(frame); !ok {
-				u.reject(from)
+			var why rejectReason
+			if frame, seq, hasSeq, why = u.l2tp.decode(frame); why != accepted {
+				u.reject(from, why)
 				continue
 			}
 		}
 		if len(frame) < HeaderLen {
+			u.reject(from, rejectShort)
 			continue
 		}
 		u.mu.Lock()
+		if hasSeq {
+			u.sequence(from, seq)
+		}
 		if !slices.Contains(u.static, from) {
 			u.learned[from] = time.Now()
 		} else {
@@ -292,6 +377,7 @@ func (u *UDP) WriteFrameExcept(frame []byte, except netip.AddrPort) (int, error)
 		if p == except {
 			continue
 		}
+		u.number(dg, p)
 		if _, e := u.conn.WriteToUDPAddrPort(dg, p); e != nil {
 			if err == nil {
 				err = e
@@ -303,20 +389,31 @@ func (u *UDP) WriteFrameExcept(frame []byte, except netip.AddrPort) (int, error)
 	return sent, err
 }
 
-// datagram returns frame with the encapsulation header, if any.
+// datagram returns frame with the encapsulation header, if any. Call
+// number before sending it to each peer.
 func (u *UDP) datagram(frame []byte) []byte {
 	if u.l2tp == nil {
 		return frame
 	}
+	return append(u.l2tp.encode(make([]byte, 0, u.l2tp.headerLen()+len(frame)), 0), frame...)
+}
+
+// number sets the sequence number of a datagram for peer to.
+func (u *UDP) number(dg []byte, to netip.AddrPort) {
+	if u.l2tp == nil || !u.l2tp.Counter {
+		return
+	}
 	u.mu.Lock()
-	u.seq++
-	seq := u.seq
+	u.seq[to]++
+	seq := u.seq[to]
 	u.mu.Unlock()
-	return append(u.l2tp.encode(make([]byte, 0, u.l2tp.headerLen()+len(frame)), seq), frame...)
+	u.l2tp.setSeq(dg, seq)
 }
 
 func (u *UDP) send(frame []byte, to netip.AddrPort) error {
-	_, err := u.conn.WriteToUDPAddrPort(u.datagram(Pad(frame)), to)
+	dg := u.datagram(Pad(frame))
+	u.number(dg, to)
+	_, err := u.conn.WriteToUDPAddrPort(dg, to)
 	return err
 }
 
@@ -326,7 +423,7 @@ func (u *UDP) destinations(frame []byte) []netip.AddrPort {
 	now := time.Now()
 	for p, t := range u.learned {
 		if now.Sub(t) > peerTimeout {
-			delete(u.learned, p)
+			u.forget(p)
 		}
 	}
 	if dst := [6]byte(frame[0:6]); dst[0]&1 == 0 {

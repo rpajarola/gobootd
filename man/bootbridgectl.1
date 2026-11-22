@@ -73,6 +73,16 @@ or to one transport by name.
 .It Cm stats Oo Fl w Oc
 Packets, bytes and errors per side, once, or every second with
 .Fl w .
+Then, per UDP transport, the datagrams it dropped: too short for a frame,
+not an L2TPv3 data message, for another session, or with the wrong
+cookie.
+For L2TPv3 with sequence numbers, it also shows how many numbers were
+skipped (frames lost, or still to arrive out of order), how many frames
+arrived late (reordered or duplicated, and still delivered), and how often
+a peer started over.
+Raw transports show
+.Li -
+for the L2TPv3 counters.
 .It Cm tail Oo Fl n Ar count Oc
 The last
 .Ar count

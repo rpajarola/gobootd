@@ -447,9 +447,10 @@ func ago(s string) string {
 
 func printStats(w io.Writer, b []byte) error {
 	var st struct {
-		Time string   `json:"time"`
-		LAN  statsRow `json:"lan"`
-		UDP  statsRow `json:"udp"`
+		Time       string        `json:"time"`
+		LAN        statsRow      `json:"lan"`
+		UDP        statsRow      `json:"udp"`
+		Transports []rxErrorsRow `json:"transport_errors"`
 	}
 	if err := json.Unmarshal(b, &st); err != nil {
 		return err
@@ -464,7 +465,42 @@ func printStats(w io.Writer, b []byte) error {
 	for _, s := range []statsRow{st.LAN, st.UDP} {
 		fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%d\t%d\t%d\n", s.Name, s.Hosts, s.RxPackets, s.RxBytes, s.TxPackets, s.TxBytes, s.Errors)
 	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	if len(st.Transports) == 0 {
+		return nil
+	}
+	// What each transport dropped, and the L2TPv3 sequence errors of
+	// what it delivered; raw transports have no L2TPv3 counters.
+	fmt.Fprintln(w)
+	tw = tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintf(tw, "TRANSPORT\tDROPPED\tSHORT\tBAD HDR\tSESSION\tCOOKIE\tSEQ LOST\tSEQ LATE\tSEQ RESTART\n")
+	for _, t := range st.Transports {
+		fmt.Fprintf(tw, "%s\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\n", t.Name, t.Dropped, t.Short,
+			count(t.BadHeader), count(t.Session), count(t.Cookie), count(t.SeqLost), count(t.SeqLate), count(t.SeqRestart))
+	}
 	return tw.Flush()
+}
+
+type rxErrorsRow struct {
+	Name       string  `json:"name"`
+	Dropped    uint64  `json:"dropped"`
+	Short      uint64  `json:"short"`
+	BadHeader  *uint64 `json:"bad_header"`
+	Session    *uint64 `json:"session"`
+	Cookie     *uint64 `json:"cookie"`
+	SeqLost    *uint64 `json:"seq_lost"`
+	SeqLate    *uint64 `json:"seq_late"`
+	SeqRestart *uint64 `json:"seq_restart"`
+}
+
+// count prints a counter, or - if the transport has none.
+func count(n *uint64) string {
+	if n == nil {
+		return "-"
+	}
+	return strconv.FormatUint(*n, 10)
 }
 
 type statsRow struct {

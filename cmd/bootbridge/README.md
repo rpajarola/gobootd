@@ -89,7 +89,7 @@ and [bootbridgectl](../../man/bootbridgectl.1) talks to it:
 ```
 $ bootbridgectl status          # version, pid, uptime, interface, printing settings
 $ bootbridgectl peers           # UDP peers and the MAC addresses learned at each
-$ bootbridgectl stats -w        # packet and byte counters, once per second
+$ bootbridgectl stats -w        # packet, byte and L2TPv3 error counters, once per second
 $ bootbridgectl tail -n 20      # the last frames the bridge forwarded
 $ bootbridgectl log -i udp      # live, like -print; use dump for -X
 $ bootbridgectl set -print on   # same toggles as the keys

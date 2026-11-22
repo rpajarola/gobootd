@@ -891,3 +891,34 @@ func TestBridgeSegmentsWithoutSYN(t *testing.T) {
 		}
 	}
 }
+
+// TestLogRxErrors: the stats log reports a transport's receive errors
+// when they change, and only then.
+func TestLogRxErrors(t *testing.T) {
+	u, err := link.ListenUDP(netip.MustParseAddrPort("127.0.0.1:0"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer u.Close()
+	var buf bytes.Buffer
+	b := &Bridge{UDP: u, Log: slog.New(slog.NewTextHandler(&buf, nil))}
+	b.LogStats()
+	if strings.Contains(buf.String(), "receive errors") {
+		t.Fatalf("logged without errors:\n%s", buf.String())
+	}
+	c, err := net.DialUDP("udp", nil, net.UDPAddrFromAddrPort(u.Addr()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.Write([]byte("short"))
+	c.Write(link.Pad(link.Build(link.Broadcast, net.HardwareAddr{2, 0, 0, 0, 0, 1}, link.TypeARP, nil)))
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	u.ReadFrame(ctx) // drops the short one, returns the frame
+	b.LogStats()
+	b.LogStats()
+	if n := strings.Count(buf.String(), "transport receive errors"); n != 1 || !strings.Contains(buf.String(), "short=1") {
+		t.Errorf("logged %d times:\n%s", n, buf.String())
+	}
+}

@@ -36,6 +36,7 @@ sudo bootbridge -i en0 -l2tp 0.0.0.0:1701 -cookie 0x0123456789abcdef
 | `-print` / `-p` | off | print packets as they pass through the bridge |
 | `-X` / `-dump` | off | dump very verbose packet info (hex/ASCII dump, like tcpdump -X) |
 | `-print-iface` | `all` | which packets to print: `all`, `auto` (all but LAN noise), `lan`, `udp`, or `-lan` for all but `lan` |
+| `-announce` | `auto` | announce the listeners not on loopback over DNS-SD/mDNS: `auto`, `off`, or interface names |
 | `-ctl` | default path | control socket for bootbridgectl (`""` for the default, `-` for none) |
 
 ### Configuration file
@@ -103,6 +104,29 @@ write it can see every frame the bridge forwards and can change what it
 prints; a non-root service gets its directory from
 `RuntimeDirectory=bootbridge` in the unit file. `-json` on any command
 prints the server's JSON lines unchanged, for `jq`.
+
+### Finding a bridge
+
+bootbridge announces the listeners other machines can reach, those not on
+loopback, over DNS-SD/mDNS as `_bootbridge._udp`: an instance per
+listener, with a TXT record holding the encapsulation, the L2TPv3
+session, the cookie's length (never the cookie) and the bridged
+interface. On another machine:
+
+```
+$ bootbridgectl find
+NAME                               ADDRESS     PORT  ENCAP   SESSION  COOKIE  COUNTER  LAN   VIA
+bootbridge on lab (eth0, L2TPv3)   10.3.0.76   1701  l2tpv3  1        64-bit  on       eth0  enp2s0
+$ bootbridgectl find -qemu
+# bootbridge on lab (eth0, L2TPv3)
+-netdev l2tpv3,id=n0,udp=on,src=0.0.0.0,srcport=1701,dst=10.3.0.76,dstport=1701,txsession=1,rxsession=1,cookie64=on,txcookie=COOKIE,rxcookie=COOKIE,counter=on
+```
+
+`-simh` prints an `attach xq` line instead, for raw listeners. `avahi-browse
+-r _bootbridge._udp` and `dns-sd -B _bootbridge._udp` see the same. The
+announcement shares port 5353 with Avahi or mDNSResponder, which need
+not run. `-announce off` (or `announce = "off"`) turns it off;
+`-announce eth0` limits it to one interface.
 
 bootd then uses a network block such as:
 

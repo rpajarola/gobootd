@@ -100,6 +100,24 @@ Every frame as it passes, like
 The same with a hex and ASCII dump of each frame, like
 .Xr bootbridge 8
 .Fl X .
+.It Cm find Oo Fl w Ar wait Oc Oo Fl qemu | Fl simh Oc
+The bridges that announce themselves on the networks of this machine,
+over DNS-SD and multicast DNS, found within
+.Ar wait
+(2s by default): their address, port, encapsulation, L2TPv3 session,
+cookie length and sequence numbers, the interface they bridge, and the
+local interface that heard them.
+It does not use the control socket and works on any machine.
+.Fl qemu
+prints a QEMU
+.Fl netdev
+for each bridge instead, and
+.Fl simh
+a simh
+.Ic attach xq
+command for each raw one; the announcement leaves out the cookie, so
+.Li COOKIE
+stands for it, and the local port 4712 is any free port.
 .It Cm set Oo Fl print Ar on Ns | Ns off Oc Oo Fl dump Ar on Ns | Ns off Oc Oo Fl iface Ar what Oc
 Change what
 .Xr bootbridge 8
@@ -159,6 +177,7 @@ Anything else is an error that lists what would work.
 .Pp
 All commands take
 .Fl socket Ar path
+.Pq but Cm find
 and
 .Fl json .
 .Bl -tag -width "-socket path" -offset indent -compact
@@ -200,6 +219,10 @@ leaves out:
 Turn on the bridge's own packet printing for the LAN side:
 .Pp
 .Dl # bootbridgectl set -print on -iface lan
+.Pp
+On another machine, find the bridges and connect QEMU to one:
+.Pp
+.Dl $ bootbridgectl find -qemu
 .Pp
 Script it:
 .Pp

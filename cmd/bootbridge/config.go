@@ -26,11 +26,13 @@ type fileConfig struct {
 	Print          bool       `hcl:"print,optional"`
 	Dump           bool       `hcl:"dump,optional"`
 	PrintInterface string     `hcl:"print_interface,optional"`
+	Announce       *string    `hcl:"announce,optional"`
 	Raw            *rawBlock  `hcl:"raw,block"`
 	L2TP           *l2tpBlock `hcl:"l2tp,block"`
 
-	StatsRange   hcl.Range `hcl:"stats,attr_range"`
-	CTLModeRange hcl.Range `hcl:"ctl_mode,attr_range"`
+	StatsRange    hcl.Range `hcl:"stats,attr_range"`
+	CTLModeRange  hcl.Range `hcl:"ctl_mode,attr_range"`
+	AnnounceRange hcl.Range `hcl:"announce,attr_range"`
 }
 
 // rawBlock is the raw (HECnet bridge format) listener.
@@ -71,11 +73,12 @@ type settings struct {
 	verbose          bool
 	print, dump      bool
 	printIface       string
+	announce         string
 }
 
 // defaults are the settings without a configuration file.
 func defaults() settings {
-	return settings{listen: "127.0.0.1:4711", session: 1, counter: true, stats: 30 * time.Second, printIface: "all", ctl: "", ctlMode: 0o660}
+	return settings{listen: "127.0.0.1:4711", session: 1, counter: true, stats: 30 * time.Second, printIface: "all", ctl: "", ctlMode: 0o660, announce: "auto"}
 }
 
 // loadConfig reads a configuration file. The diagnostics need the parser's
@@ -112,6 +115,12 @@ func loadConfig(path string) (settings, *hclparse.Parser, hcl.Diagnostics) {
 	}
 	if c.PrintInterface != "" {
 		s.printIface = c.PrintInterface
+	}
+	if c.Announce != nil {
+		s.announce = *c.Announce
+		if _, _, err := parseAnnounce(s.announce); err != nil {
+			errorf(c.AnnounceRange, "Invalid announce", "%q: use \"auto\", \"off\" or interface names separated by commas.", s.announce)
+		}
 	}
 	if c.Stats != "" {
 		d, err := time.ParseDuration(c.Stats)
@@ -167,6 +176,10 @@ func loadConfig(path string) (settings, *hclparse.Parser, hcl.Diagnostics) {
 // check turns settings into options. Errors are usage errors.
 func (s settings) check() (options, error) {
 	o := options{iface: s.iface, listen: s.listen, l2tp: s.l2tp, stats: s.stats, printPkts: s.print, dumpPkts: s.dump, printIface: s.printIface, ctl: s.ctl, ctlMode: s.ctlMode}
+	var err error
+	if o.announce, o.announceIfaces, err = parseAnnounce(s.announce); err != nil {
+		return o, err
+	}
 	if s.iface == "" {
 		return o, fmt.Errorf("no interface: use -i or interface in the configuration file")
 	}

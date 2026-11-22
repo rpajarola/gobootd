@@ -100,8 +100,9 @@ func mainCmdWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 	fs.BoolVar(&f.dump, "dump", false, "alias for -X")
 	fs.StringVar(&f.printIface, "print-iface", d.printIface, "interface to print packets for (udp, lan, all, or interface name)")
 	fs.StringVar(&f.printIface, "print-interface", d.printIface, "alias for -print-iface")
+	fs.StringVar(&f.announce, "announce", d.announce, "announce the listeners over DNS-SD/mDNS: auto, off, or interface names")
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "usage: bootbridge [-c config] -i interface [-listen addr:port] [-peer addr:port]... [-l2tp addr:port [-l2tp-peer addr:port]... [-session id] [-cookie hex] [-counter=false]] [-stats duration] [-v] [-print] [-X] [-print-iface name]\n")
+		fmt.Fprintf(stderr, "usage: bootbridge [-c config] -i interface [-listen addr:port] [-peer addr:port]... [-l2tp addr:port [-l2tp-peer addr:port]... [-session id] [-cookie hex] [-counter=false]] [-stats duration] [-v] [-print] [-X] [-print-iface name] [-announce auto|off|ifaces]\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -160,6 +161,8 @@ func mainCmdWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 			s.dump = f.dump
 		case "print-iface", "print-interface":
 			s.printIface = f.printIface
+		case "announce":
+			s.announce = f.announce
 		}
 	})
 	o, err := s.check()
@@ -193,6 +196,8 @@ type options struct {
 	printPkts        bool
 	dumpPkts         bool
 	printIface       string
+	announce         bool
+	announceIfaces   []string // nil: all
 }
 
 func run(o options, configPath string, stdin io.Reader, stdout io.Writer, log *slog.Logger) error {
@@ -288,6 +293,9 @@ func run(o options, configPath string, stdin io.Reader, stdout io.Writer, log *s
 				}
 			}()
 		}
+	}
+	if o.announce {
+		defer startAnnounce(ctx, o, members, log)()
 	}
 	if stdin != nil {
 		go handleKeyboard(ctx, stop, stdin, stdout, b, log)

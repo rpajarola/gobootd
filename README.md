@@ -117,7 +117,9 @@ header. This is the format of the HECnet bridge, which simh and QEMU speak:
   bootd then uses `udp = "127.0.0.1:4712"` and `peers = ["127.0.0.1:4711"]`.
   Several peers (bootd, simh, QEMU) can share one bridge. While it runs,
   `bootbridgectl peers` and `bootbridgectl dump` show who is attached and
-  what passes through.
+  what passes through. bootbridge announces its listeners that are not on
+  loopback over DNS-SD/mDNS; `bootbridgectl find -qemu` (or `-simh`) on
+  another machine lists them with the line to connect an emulator.
 - **simh**: `attach xq udp:4713:127.0.0.1:4712`
 - **QEMU**: `-netdev dgram,id=n0,local.type=inet,local.host=127.0.0.1,local.port=4713,remote.type=inet,remote.host=127.0.0.1,remote.port=4712`
 

@@ -13,6 +13,13 @@ interface = "en0"
 # dump    = false     # print them with a hex dump, like tcpdump -X
 # print_interface = "all"   # all, auto (all but LAN noise), lan, udp, or -lan for all but lan
 
+# Announce the listeners that are not on loopback over DNS-SD/mDNS, as
+# _bootbridge._udp, so that "bootbridgectl find" (or avahi-browse, dns-sd)
+# on other machines finds them. The cookie is never announced.
+# "auto" announces on every interface a listener is reachable on, "off"
+# not at all, or name the interfaces: "eth0,eth1".
+# announce = "auto"
+
 # Control socket for bootbridgectl: status, peers, live packet dumps.
 # Unset uses the default path; "-" disables it. The socket is mode 0660,
 # so anyone who can write it can see every frame the bridge forwards.

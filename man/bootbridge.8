@@ -21,6 +21,7 @@
 .Op Fl print
 .Op Fl X
 .Op Fl print-iface Ar what
+.Op Fl announce Ar how
 .Nm
 .Fl version
 .Sh DESCRIPTION
@@ -77,6 +78,34 @@ address, as in a learning switch; broadcast, multicast and frames for
 unknown destinations go to every peer.
 Frames also pass between peers, never back to the peer they came from.
 Fixed peers are sent a keepalive every 60 seconds.
+.Pp
+Listeners that other machines can reach, those not on a loopback
+address, are announced over DNS-SD and multicast DNS (RFC 6762, RFC 6763)
+as
+.Li _bootbridge._udp ,
+one instance per listener, named
+.Dq bootbridge on Ar host Pq Ar interface , Ar encapsulation .
+Its TXT record holds
+.Li encap
+.Pq Li l2tpv3 No or Li raw ,
+for L2TPv3
+.Li session ,
+.Li cookie
+(the cookie's length in bits, 0 for none: never the cookie itself)
+and
+.Li counter ,
+and
+.Li lan ,
+the bridged interface.
+.Xr bootbridgectl 1
+.Cm find
+lists them, as do
+.Nm avahi-browse
+and
+.Nm dns-sd .
+.Nm
+answers for these records alone, next to the system's responder if
+there is one, over IPv4.
 .Pp
 The options are:
 .Bl -tag -width Ds
@@ -155,6 +184,13 @@ in front for everything else, as
 .Xr bootbridgectl 1
 describes them.
 bootbridge does not start with any other value.
+.It Fl announce Ar how
+Where to announce the listeners over DNS-SD:
+.Cm auto
+(the default) on every interface one of them is reachable on,
+.Cm off
+nowhere, or a comma-separated list of interface names.
+Interfaces and addresses that come and go are noticed within 30 seconds.
 .It Fl version
 Print the version.
 .El
@@ -226,6 +262,9 @@ As
 .It Ic print_interface No = Ar string
 As
 .Fl print-iface .
+.It Ic announce No = Ar string
+As
+.Fl announce .
 .It Ic raw Brq ...
 The raw listener, with
 .Ic listen
@@ -314,6 +353,14 @@ runs as a service:
 .Xr bootbridgectl 1
 .Sh STANDARDS
 .Rs
+.%R RFC 6762
+.%T Multicast DNS
+.Re
+.Rs
+.%R RFC 6763
+.%T DNS-Based Service Discovery
+.Re
+.Rs
 .%R RFC 3931
 .%T Layer Two Tunneling Protocol - Version 3 (L2TPv3)
 .Re
@@ -324,6 +371,13 @@ runs as a service:
 .Sh AUTHORS
 .An Rico Pajarola Aq Mt rp@servium.ch
 .Sh CAVEATS
+The announcement tells everyone on the network where the bridge is;
+without a cookie, anyone can then send it frames.
+.Fl announce Cm off
+keeps it quiet.
+It does not probe for a conflicting instance name, which would take
+another bridge on a host of the same name and interface.
+.Pp
 Full frames exceed a 1500-byte MTU as UDP datagrams and are fragmented
 across real networks.
 There is no loop protection: two bridges joined twice pass frames around

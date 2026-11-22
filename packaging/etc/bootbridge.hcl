@@ -19,7 +19,9 @@ raw {
   peers  = ["127.0.0.1:4712"]   # bootd
 }
 
-# L2TPv3 for machines elsewhere.
+# L2TPv3 for machines elsewhere. Listeners that are not on loopback are
+# announced over DNS-SD/mDNS for "bootbridgectl find"; announce = "off"
+# stops that.
 # l2tp {
 #   listen = "0.0.0.0:1701"
 #   cookie = "0x0123456789abcdef"

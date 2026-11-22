@@ -53,7 +53,12 @@ func mainCmd(args []string, stdout, stderr io.Writer) int {
 	socket := fs.String("socket", "", "control socket path (default: $BOOTBRIDGE_CTL_SOCKET, or the system bridge's socket, then your own)")
 	asJSON := fs.Bool("json", false, "print the server's JSON lines unchanged")
 	var o opts
+	var fo findOpts
 	switch name {
+	case "find":
+		fs.DurationVar(&fo.wait, "w", 2*time.Second, "how long to wait for answers")
+		fs.BoolVar(&fo.qemu, "qemu", false, "print a QEMU -netdev for each bridge")
+		fs.BoolVar(&fo.simh, "simh", false, "print a simh attach command for each bridge")
 	case "status":
 	case "peers":
 		fs.StringVar(&o.iface, "i", "", "what to show: all (default), lan, udp, a transport, l2tp, raw; -name for all but that")
@@ -89,6 +94,14 @@ func mainCmd(args []string, stdout, stderr io.Writer) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if name == "find" {
+		fo.json = *asJSON
+		if err := find(ctx, stdout, fo); err != nil {
+			fmt.Fprintf(stderr, "bootbridgectl: %v\n", err)
+			return 1
+		}
+		return 0
+	}
 	c := &client{socket: *socket, json: *asJSON, w: stdout}
 	if err := c.run(ctx, name, o); err != nil {
 		if ctx.Err() != nil {
@@ -124,6 +137,10 @@ commands:
     -n count             stop after this many frames
   set [-print on|off] [-dump on|off] [-iface what]
                          change the packet printing settings
+  find [-w wait] [-qemu|-simh]
+                         the bridges that announce themselves on the
+                         networks of this machine, over DNS-SD/mDNS, or
+                         how to connect QEMU or simh to them
 
 -i and -iface take all; auto, which is all but LAN traffic that has
 nothing to do with the UDP side (IPv6, spanning tree and LLDP, mDNS, SSDP
@@ -132,7 +149,7 @@ their names; and with peers, a transport by name, any unique part of it,
 or l2tp or raw. A - or ! in front means everything else: -i -lan. The
 default is auto for frames and all for peers.
 
-Every command takes -socket path and -json to print the server's JSON
+Every command takes -socket path (but find) and -json to print the server's JSON
 lines unchanged. The control socket is bootbridge's -ctl path: its
 default is /run/bootbridge/bootbridge.sock when bootbridge runs as root
 (/var/run where there is no /run), and a per-user socket in

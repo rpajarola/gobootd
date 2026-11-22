@@ -84,6 +84,9 @@ type Bridge struct {
 
 	printPackets atomic.Bool
 	dumpPackets  atomic.Bool
+	// settingsOnce copies PrintPackets and DumpPackets into the atomics
+	// before their first use, so a change made before Run starts is kept.
+	settingsOnce sync.Once
 	printIface   atomic.Pointer[Filter]
 	printMu      sync.Mutex
 
@@ -165,16 +168,26 @@ func (b *Bridge) pruneLocked(now time.Time) {
 
 // SetPrintPackets sets whether packet printing is enabled.
 func (b *Bridge) SetPrintPackets(enabled bool) {
+	b.initSettings()
 	b.printPackets.Store(enabled)
+}
+
+func (b *Bridge) initSettings() {
+	b.settingsOnce.Do(func() {
+		b.printPackets.Store(b.PrintPackets)
+		b.dumpPackets.Store(b.DumpPackets)
+	})
 }
 
 // SetDumpPackets sets whether extra verbose packet dumping is enabled.
 func (b *Bridge) SetDumpPackets(enabled bool) {
+	b.initSettings()
 	b.dumpPackets.Store(enabled)
 }
 
 // TogglePrintPackets toggles packet printing on or off and returns the new state.
 func (b *Bridge) TogglePrintPackets() bool {
+	b.initSettings()
 	for {
 		old := b.printPackets.Load()
 		if b.printPackets.CompareAndSwap(old, !old) {
@@ -185,6 +198,7 @@ func (b *Bridge) TogglePrintPackets() bool {
 
 // ToggleDumpPackets toggles extra verbose packet dumping on or off and returns the new state.
 func (b *Bridge) ToggleDumpPackets() bool {
+	b.initSettings()
 	for {
 		old := b.dumpPackets.Load()
 		if b.dumpPackets.CompareAndSwap(old, !old) {
@@ -195,11 +209,13 @@ func (b *Bridge) ToggleDumpPackets() bool {
 
 // IsPrintPackets reports whether packet printing is enabled.
 func (b *Bridge) IsPrintPackets() bool {
+	b.initSettings()
 	return b.printPackets.Load() || b.dumpPackets.Load()
 }
 
 // IsDumpPackets reports whether extra verbose packet dumping is enabled.
 func (b *Bridge) IsDumpPackets() bool {
+	b.initSettings()
 	return b.dumpPackets.Load()
 }
 
@@ -409,8 +425,7 @@ func (b *Bridge) recordLANTx(bytes, pkts int, err error) {
 
 // Run forwards frames until ctx is done or a port fails.
 func (b *Bridge) Run(ctx context.Context) error {
-	b.printPackets.Store(b.PrintPackets)
-	b.dumpPackets.Store(b.DumpPackets)
+	b.initSettings()
 	if p := b.printIface.Load(); p == nil {
 		spec := b.PrintInterface
 		if spec == "" {

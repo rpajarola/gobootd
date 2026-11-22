@@ -15,7 +15,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -80,7 +79,9 @@ type Args struct {
 	// Tail is how many remembered frames log and dump replay before
 	// streaming live.
 	Tail int `json:"tail,omitempty"`
-	// Iface limits the output to one interface ("lan", "udp", or a name).
+	// Iface selects what is shown, as bridge.ParseFilter reads it:
+	// "all", "auto" (the default for frames), "lan", "udp", a name,
+	// and with - in front, everything else.
 	Iface string `json:"iface,omitempty"`
 	// Print, Dump and Iface are set by the set command.
 	Print *bool `json:"print,omitempty"`
@@ -322,35 +323,23 @@ type hostJSON struct {
 	IP  string `json:"ip,omitempty"`
 }
 
-// matchIface reports whether name passes the filter, in the style of
-// bootbridge's -print-iface: lan and udp name the sides, anything else
-// must be part of the interface's name.
-func matchIface(filter, name string, isLAN func(string) bool) bool {
-	switch strings.ToLower(filter) {
-	case "", "all":
-		return true
-	case "lan":
-		return isLAN(name)
-	case "udp", "l2tp":
-		return !isLAN(name)
-	}
-	return strings.EqualFold(name, filter) || strings.Contains(name, filter)
-}
-
 func (s *Server) peers(w io.Writer, iface string) error {
 	b := s.Bridge
-	isLAN := func(name string) bool { return name == b.LANName() }
+	f, err := b.ParseFilter(iface, bridge.ForPeers)
+	if err != nil {
+		return writeError(w, "-i "+err.Error())
+	}
 	var ts []transportJSON
 	for _, t := range b.UDPPeers() {
-		if matchIface(iface, t.Name, isLAN) {
+		if f.Transport(t.Name) {
 			ts = append(ts, convertTransport(t))
 		}
 	}
 	out := map[string]any{"transports": ts}
-	if matchIface(iface, b.LANName(), isLAN) {
+	if f.LAN {
 		out["lan_hosts"] = convertHosts(b.LANHosts())
 	}
-	if matchIface(iface, b.UDPName(), isLAN) {
+	if f.AllTransports() {
 		out["udp_hosts"] = convertHosts(b.UDPHosts())
 	}
 	return writeJSON(w, out)
@@ -446,6 +435,12 @@ func (s *Server) statsSnapshot() map[string]any {
 
 func (s *Server) set(w io.Writer, a Args) error {
 	b := s.Bridge
+	if a.Iface != "" {
+		// Checked first, so a bad filter changes nothing.
+		if _, err := b.ParseFilter(a.Iface, bridge.ForFrames); err != nil {
+			return writeError(w, "-iface "+err.Error())
+		}
+	}
 	if a.Print != nil {
 		b.SetPrintPackets(*a.Print)
 	}
@@ -458,15 +453,26 @@ func (s *Server) set(w io.Writer, a Args) error {
 	return s.status(w)
 }
 
-// tail sends the n last remembered frames, all of them for n <= 0.
+// tail sends the n last remembered frames that pass the filter, all of
+// them for n <= 0.
 func (s *Server) tail(w io.Writer, a Args) error {
-	n := a.N
-	if n <= 0 {
-		n = -1 // the whole ring
+	b := s.Bridge
+	f, err := b.ParseFilter(a.Iface, bridge.ForFrames)
+	if err != nil {
+		return writeError(w, "-i "+err.Error())
 	}
-	watcher := s.Bridge.Watch(n)
+	watcher := b.Watch(-1) // the whole ring, filtered below
 	defer watcher.Stop()
+	var es []bridge.FrameEvent
 	for _, e := range watcher.History() {
+		if f.Frame(e, b.LANName()) {
+			es = append(es, e)
+		}
+	}
+	if a.N > 0 && len(es) > a.N {
+		es = es[len(es)-a.N:]
+	}
+	for _, e := range es {
 		if err := writeJSON(w, entryOf(e)); err != nil {
 			return err
 		}
@@ -479,11 +485,14 @@ func (s *Server) tail(w io.Writer, a Args) error {
 // client disconnects.
 func (s *Server) frames(ctx context.Context, w io.Writer, a Args) error {
 	b := s.Bridge
-	isLAN := func(name string) bool { return name == b.LANName() }
+	f, err := b.ParseFilter(a.Iface, bridge.ForFrames)
+	if err != nil {
+		return writeError(w, "-i "+err.Error())
+	}
 	watcher := b.Watch(max(a.Tail, 0))
 	defer watcher.Stop()
 	for _, e := range watcher.History() {
-		if matchIface(a.Iface, e.Interface, isLAN) {
+		if f.Frame(e, b.LANName()) {
 			if err := writeJSON(w, entryOf(e)); err != nil {
 				return err
 			}
@@ -504,7 +513,7 @@ func (s *Server) frames(ctx context.Context, w io.Writer, a Args) error {
 				notice()
 				return nil
 			}
-			if !matchIface(a.Iface, e.Interface, isLAN) {
+			if !f.Frame(e, b.LANName()) {
 				continue
 			}
 			if err := writeJSON(w, entryOf(e)); err != nil {

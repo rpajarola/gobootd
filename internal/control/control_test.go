@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,7 +25,12 @@ var sunMAC = net.HardwareAddr{0x08, 0, 0x20, 0, 0, 1}
 // that has a configured peer nobody ever sends to.
 func testServer(t *testing.T) (*Server, *bridge.Bridge, *link.UDP) {
 	t.Helper()
-	seg := linktest.NewSegment()
+	return testServerOn(t, linktest.NewSegment())
+}
+
+// testServerOn runs the bridge's LAN side on seg.
+func testServerOn(t *testing.T, seg *linktest.Segment) (*Server, *bridge.Bridge, *link.UDP) {
+	t.Helper()
 	lanPort := seg.Station("02:00:00:00:00:fe")
 	udp := mustListen(t, netip.MustParseAddrPort("127.0.0.1:5099"))
 	b := &bridge.Bridge{LAN: lanPort, UDP: udp, Log: slog.New(slog.DiscardHandler)}
@@ -334,4 +340,80 @@ func mustLine(t *testing.T, sc *bufio.Scanner) map[string]json.RawMessage {
 		t.Fatalf("bad JSON %q: %v", sc.Text(), err)
 	}
 	return v
+}
+
+// TestFilters: -i picks frames and peers, the default hides LAN noise,
+// and nonsense is an error that says what would work.
+func TestFilters(t *testing.T) {
+	seg := linktest.NewSegment()
+	s, b, udp := testServerOn(t, seg)
+	lan := seg.Station("08:00:20:00:00:09")
+	peer := mustListen(t, udp.Addr())
+	w := b.Watch(0)
+	defer w.Stop()
+	peer.WriteFrame(link.Build(link.Broadcast, sunMAC, link.TypeRARP, make([]byte, 28)))
+	<-w.Events
+	lan.WriteFrame(link.Build(link.Broadcast, mac("08:00:20:00:00:09"), link.TypeRARP, make([]byte, 28)))
+	<-w.Events
+	lan.WriteFrame(link.Build(mac("33:33:00:00:00:01"), mac("08:00:20:00:00:09"), 0x86dd, make([]byte, 40)))
+	<-w.Events
+
+	count := func(method string, a Args) (n int, errMsg string) {
+		t.Helper()
+		c := request(t, s, method, a)
+		defer c.Close()
+		sc := bufio.NewScanner(c)
+		for sc.Scan() {
+			var v map[string]json.RawMessage
+			json.Unmarshal(sc.Bytes(), &v)
+			if e, ok := v["error"]; ok {
+				json.Unmarshal(e, &errMsg)
+				return n, errMsg
+			}
+			n++
+		}
+		return n, ""
+	}
+	for _, tc := range []struct {
+		iface string
+		n     int
+	}{
+		{"", 2},     // auto: IPv6 from the LAN is noise
+		{"all", 3},  // everything
+		{"lan", 2},  // both LAN frames
+		{"-lan", 1}, // the UDP peer's
+		{"udp", 1},
+		{"-udp", 2},
+	} {
+		if n, e := count("tail", Args{Iface: tc.iface}); n != tc.n || e != "" {
+			t.Errorf("tail -i %q: %d frames %q, want %d", tc.iface, n, e, tc.n)
+		}
+	}
+	if n, _ := count("tail", Args{Iface: "all", N: 1}); n != 1 {
+		t.Errorf("tail -n 1 sent %d", n)
+	}
+
+	for _, method := range []string{"tail", "log", "peers", "set"} {
+		if _, e := count(method, Args{Iface: "nonsense"}); !strings.Contains(e, "use all, auto, lan") {
+			t.Errorf("%s -i nonsense: error %q", method, e)
+		}
+	}
+	if b.GetPrintInterface() != "all" {
+		t.Errorf("a bad set changed the filter to %q", b.GetPrintInterface())
+	}
+
+	var p struct {
+		Transports []json.RawMessage `json:"transports"`
+		LAN        []json.RawMessage `json:"lan_hosts"`
+		UDP        []json.RawMessage `json:"udp_hosts"`
+	}
+	decode(t, readLine(t, request(t, s, "peers", Args{Iface: "-lan"})), &p)
+	if len(p.Transports) != 1 || p.LAN != nil || p.UDP == nil {
+		t.Errorf("peers -i -lan: %+v", p)
+	}
+}
+
+func mac(s string) net.HardwareAddr {
+	m, _ := net.ParseMAC(s)
+	return m
 }

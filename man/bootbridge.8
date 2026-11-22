@@ -20,7 +20,7 @@
 .Op Fl v
 .Op Fl print
 .Op Fl X
-.Op Fl print-iface Ar name
+.Op Fl print-iface Ar what
 .Nm
 .Fl version
 .Sh DESCRIPTION
@@ -140,12 +140,21 @@ Print packets as they pass through the bridge.
 .It Fl X , Fl dump
 Print packets with a hex and ASCII dump, like
 .Nm tcpdump Fl X .
-.It Fl print-iface Ar name , Fl print-interface Ar name
-Only print packets on one side:
-.Cm udp ,
-.Cm lan ,
+.It Fl print-iface Ar what , Fl print-interface Ar what
+Which packets to print:
 .Cm all
-(the default), or an interface name.
+(the default),
+.Cm auto
+(all but LAN noise),
+.Cm lan
+or
+.Cm udp ,
+the sides also by their names, or one of these with
+.Ql -
+in front for everything else, as
+.Xr bootbridgectl 1
+describes them.
+bootbridge does not start with any other value.
 .It Fl version
 Print the version.
 .El

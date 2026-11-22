@@ -84,7 +84,7 @@ type Bridge struct {
 
 	printPackets atomic.Bool
 	dumpPackets  atomic.Bool
-	printIface   atomic.Pointer[string]
+	printIface   atomic.Pointer[Filter]
 	printMu      sync.Mutex
 
 	mu       sync.Mutex
@@ -213,12 +213,19 @@ func (b *Bridge) UDPName() string {
 	return b.udpName()
 }
 
-// SetPrintInterface sets the interface filter for packet printing ("udp", "lan", "all", or interface name).
-func (b *Bridge) SetPrintInterface(iface string) {
-	b.printIface.Store(&iface)
+// SetPrintInterface sets which frames are printed, as ParseFilter reads
+// spec, e.g. "all", "auto", "udp" or "-lan". The filter is left as it
+// was if spec is not valid.
+func (b *Bridge) SetPrintInterface(spec string) error {
+	f, err := b.ParseFilter(spec, ForFrames)
+	if err != nil {
+		return err
+	}
+	b.printIface.Store(&f)
+	return nil
 }
 
-// GetPrintInterface returns the current interface filter for packet printing.
+// GetPrintInterface returns the filter for packet printing as it was set.
 func (b *Bridge) GetPrintInterface() string {
 	p := b.printIface.Load()
 	if p == nil {
@@ -227,7 +234,7 @@ func (b *Bridge) GetPrintInterface() string {
 		}
 		return "all"
 	}
-	return *p
+	return p.Spec
 }
 
 // CyclePrintInterface cycles the interface print filter through: all -> udp -> lan -> all.
@@ -247,27 +254,9 @@ func (b *Bridge) CyclePrintInterface() string {
 	return next
 }
 
-func isUDPIface(iface string) bool {
-	lower := strings.ToLower(iface)
-	return lower == "udp" || strings.HasPrefix(lower, "udp:") ||
-		lower == "l2tp" || strings.HasPrefix(lower, "l2tp:")
-}
-
-func (b *Bridge) shouldPrintFor(iface string) bool {
-	filter := b.GetPrintInterface()
-	if filter == "" || strings.EqualFold(filter, "all") {
-		return true
-	}
-	filter = strings.ToLower(filter)
-
-	isUDP := isUDPIface(iface) || strings.EqualFold(iface, b.udpName())
-	if filter == "udp" || filter == "l2tp" || strings.EqualFold(filter, b.udpName()) {
-		return isUDP
-	}
-	if filter == "lan" || strings.EqualFold(filter, b.lanName()) {
-		return !isUDP
-	}
-	return strings.EqualFold(iface, filter)
+func (b *Bridge) shouldPrint(e FrameEvent) bool {
+	f := b.printIface.Load()
+	return f == nil || f.Frame(e, b.lanName())
 }
 
 func (b *Bridge) packetWriter() io.Writer {
@@ -291,7 +280,7 @@ func (b *Bridge) printPacket(w io.Writer, e FrameEvent) {
 // printEvent prints e to the packet writer if printing is enabled and e
 // passes the interface filter.
 func (b *Bridge) printEvent(e FrameEvent) {
-	if !b.IsPrintPackets() || !b.shouldPrintFor(e.Interface) {
+	if !b.IsPrintPackets() || !b.shouldPrint(e) {
 		return
 	}
 	b.printPacket(b.packetWriter(), e)
@@ -423,10 +412,12 @@ func (b *Bridge) Run(ctx context.Context) error {
 	b.printPackets.Store(b.PrintPackets)
 	b.dumpPackets.Store(b.DumpPackets)
 	if p := b.printIface.Load(); p == nil {
-		if b.PrintInterface != "" {
-			b.SetPrintInterface(b.PrintInterface)
-		} else {
-			b.SetPrintInterface("all")
+		spec := b.PrintInterface
+		if spec == "" {
+			spec = "all"
+		}
+		if err := b.SetPrintInterface(spec); err != nil {
+			return err
 		}
 	}
 	b.mu.Lock()

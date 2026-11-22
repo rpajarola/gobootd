@@ -11,7 +11,7 @@ interface = "en0"
 # verbose = false     # log every forwarding error
 # print   = false     # print packets as they pass through the bridge
 # dump    = false     # print them with a hex dump, like tcpdump -X
-# print_interface = "all"   # udp, lan, all, or an interface name
+# print_interface = "all"   # all, auto (all but LAN noise), lan, udp, or -lan for all but lan
 
 # Control socket for bootbridgectl: status, peers, live packet dumps.
 # Unset uses the default path; "-" disables it. The socket is mode 0660,

@@ -55,21 +55,18 @@ Anyone who can write the socket sees every frame bridged and can change
 what is printed.
 .Pp
 The commands are:
-.Bl -tag -width "dump [-i name]"
+.Bl -tag -width "dump [-i what]"
 .It Cm status
 The bridge's version, uptime, configuration file, interface, MAC, socket
 path, and packet printing settings.
-.It Cm peers Oo Fl i Ar name Oc
+.It Cm peers Oo Fl i Ar what Oc
 The UDP peers of every transport: the configured ones, the ones learned
 from the frames they sent, when each was last heard from, and which
 Ethernet addresses were learned from each.
 With the LAN side, the hosts seen there with their IP addresses.
 .Fl i
-limits the output to one side,
-.Cm lan
-or
-.Cm udp ,
-or to one transport by name.
+limits the output to one side or to some transports; the default is
+.Cm all .
 .It Cm stats Oo Fl w Oc
 Packets, bytes and errors per side, once, or every second with
 .Fl w .
@@ -83,30 +80,82 @@ a peer started over.
 Raw transports show
 .Li -
 for the L2TPv3 counters.
-.It Cm tail Oo Fl n Ar count Oc
+.It Cm tail Oo Fl i Ar what Oc Oo Fl n Ar count Oc
 The last
 .Ar count
-frames the bridge forwarded, 20 by default, 0 for all it remembers.
+frames the bridge forwarded that
+.Fl i
+selects, 20 by default, 0 for all it remembers.
 .It Cm tail Oo Fl t Ar count Oc Fl f
 The remembered frames again, then every new one until interrupted;
 .Fl t
 says how many to replay (50 by default) and
 .Fl n
 stops after that many.
-.It Cm log Oo Fl i Ar name Oc Oo Fl n Ar count Oc Oo Fl t Ar count Oc
+.It Cm log Oo Fl i Ar what Oc Oo Fl n Ar count Oc Oo Fl t Ar count Oc
 Every frame as it passes, like
 .Xr bootbridge 8
 .Fl print .
-.It Cm dump Oo Fl i Ar name Oc Oo Fl n Ar count Oc Oo Fl t Ar count Oc
+.It Cm dump Oo Fl i Ar what Oc Oo Fl n Ar count Oc Oo Fl t Ar count Oc
 The same with a hex and ASCII dump of each frame, like
 .Xr bootbridge 8
 .Fl X .
-.It Cm set Oo Fl print Ar on Ns | Ns off Oc Oo Fl dump Ar on Ns | Ns off Oc Oo Fl iface Ar name Oc
+.It Cm set Oo Fl print Ar on Ns | Ns off Oc Oo Fl dump Ar on Ns | Ns off Oc Oo Fl iface Ar what Oc
 Change what
 .Xr bootbridge 8
 prints to its own terminal, as its single keys do, and print the new
 settings.
 .El
+.Pp
+.Fl i
+and
+.Fl iface
+take one of these, in any case:
+.Bl -tag -width "transport" -offset indent
+.It Cm auto
+Every frame but LAN traffic that has nothing to do with the UDP side:
+IPv6, spanning tree, LLDP and CDP, IGMP, mDNS, SSDP, LLMNR, WS-Discovery
+and Dropbox LAN sync, ARP that is not about a host on the UDP side, and
+frames that stay on the LAN.
+Frames to a host on the UDP side are always shown, and so is every other
+broadcast, so a boot request that nobody answers is seen too.
+The default for
+.Cm log ,
+.Cm dump
+and
+.Cm tail .
+.It Cm all
+Every frame.
+The default for
+.Cm peers .
+.It Cm lan
+The LAN side, also by the interface's name: the frames from it, or with
+.Cm peers ,
+its hosts.
+.It Cm udp
+The UDP side, also by its name: the frames from it, or with
+.Cm peers ,
+its transports and hosts.
+.It Ar transport
+With
+.Cm peers
+only: a UDP transport by name or by any part of it that no other has,
+such as its port, or
+.Cm l2tp
+or
+.Cm raw
+for the transports of that kind.
+Frames are not told apart by transport.
+.El
+.Pp
+A
+.Ql -
+or
+.Ql \&!
+in front selects everything else:
+.Fl i Cm -lan
+shows the frames from the UDP side.
+Anything else is an error that lists what would work.
 .Pp
 All commands take
 .Fl socket Ar path
@@ -141,6 +190,12 @@ Watch a client boot, remembering what passed before you started:
 Follow the frames of one side and count them:
 .Pp
 .Dl # bootbridgectl tail -f -i udp -n 20
+.Pp
+Everything, including the LAN noise
+.Cm auto
+leaves out:
+.Pp
+.Dl # bootbridgectl log -i all
 .Pp
 Turn on the bridge's own packet printing for the LAN side:
 .Pp

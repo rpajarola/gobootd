@@ -35,7 +35,7 @@ sudo bootbridge -i en0 -l2tp 0.0.0.0:1701 -cookie 0x0123456789abcdef
 | `-v` | off | log every forwarding error |
 | `-print` / `-p` | off | print packets as they pass through the bridge |
 | `-X` / `-dump` | off | dump very verbose packet info (hex/ASCII dump, like tcpdump -X) |
-| `-print-iface` | `all` | limit packet printing to an interface (`udp`, `lan`, `all`, or interface name) |
+| `-print-iface` | `all` | which packets to print: `all`, `auto` (all but LAN noise), `lan`, `udp`, or `-lan` for all but `lan` |
 | `-ctl` | default path | control socket for bootbridgectl (`""` for the default, `-` for none) |
 
 ### Configuration file

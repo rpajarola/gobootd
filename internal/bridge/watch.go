@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/netip"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -31,6 +32,9 @@ type FrameEvent struct {
 	Frame  []byte
 	// Peer is the UDP source address, for frames from the UDP side.
 	Peer netip.AddrPort
+	// Noise marks frames from the LAN that have nothing to do with the
+	// UDP side, which the auto filter hides; see lanNoise.
+	Noise bool
 }
 
 type subscriber struct {
@@ -108,6 +112,10 @@ func (b *Bridge) publish(e FrameEvent) {
 // record publishes the frame and returns the event, for printing.
 func (b *Bridge) record(iface, action string, frame []byte, peer netip.AddrPort) FrameEvent {
 	e := FrameEvent{Time: time.Now(), Interface: iface, Action: action, Frame: slices.Clone(frame), Peer: peer}
+	if iface == b.lanName() {
+		// Frames that stay on the LAN are noise by definition.
+		e.Noise = strings.HasSuffix(action, "(filtered)") || b.lanNoise(frame)
+	}
 	b.publish(e)
 	return e
 }

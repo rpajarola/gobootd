@@ -219,3 +219,17 @@ func TestClientPaths(t *testing.T) {
 		t.Errorf("root: %v", got)
 	}
 }
+
+func TestBadFilter(t *testing.T) {
+	h := newHarness(t)
+	for _, args := range [][]string{{"log", "-i", "nonsense"}, {"tail", "-i", "x"}, {"set", "-iface", "bogus"}} {
+		code, errs := h.run(t, args...)
+		if code != 1 || !strings.Contains(errs, "use all, auto, lan") {
+			t.Errorf("%v: code %d, stderr %q", args, code, errs)
+		}
+	}
+	// -lan is a value, not a flag.
+	if code, errs := h.run(t, "tail", "-i", "-lan"); code != 0 {
+		t.Errorf("tail -i -lan: code %d: %s", code, errs)
+	}
+}

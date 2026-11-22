@@ -263,6 +263,11 @@ func run(o options, configPath string, stdin io.Reader, stdout io.Writer, log *s
 		PrintInterface: o.printIface,
 		PacketWriter:   stdout,
 	}
+	if o.printIface != "" {
+		if err := b.SetPrintInterface(o.printIface); err != nil {
+			return fmt.Errorf("-print-iface %w", err)
+		}
+	}
 	if o.ctl != "-" {
 		cs := control.New(b, control.Info{
 			Version:   version.String(),

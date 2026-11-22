@@ -56,13 +56,13 @@ func mainCmd(args []string, stdout, stderr io.Writer) int {
 	switch name {
 	case "status":
 	case "peers":
-		fs.StringVar(&o.iface, "i", "", "only this interface (lan, udp, all, or a name)")
+		fs.StringVar(&o.iface, "i", "", "what to show: all (default), lan, udp, a transport, l2tp, raw; -name for all but that")
 	case "log", "dump":
-		fs.StringVar(&o.iface, "i", "", "only this interface (lan, udp, all, or a name)")
+		fs.StringVar(&o.iface, "i", "", "which frames: auto (default), all, lan, udp; -lan for all but lan")
 		fs.IntVar(&o.n, "n", 0, "stop after this many frames")
 		fs.IntVar(&o.tail, "t", 0, "replay this many remembered frames first")
 	case "tail":
-		fs.StringVar(&o.iface, "i", "", "only this interface (lan, udp, all, or a name)")
+		fs.StringVar(&o.iface, "i", "", "which frames: auto (default), all, lan, udp; -lan for all but lan")
 		fs.IntVar(&o.n, "n", 20, "print this many remembered frames (0 for all)")
 		fs.BoolVar(&o.follow, "f", false, "keep printing live frames")
 		fs.IntVar(&o.tail, "t", 50, "with -f: replay this many remembered frames first")
@@ -71,7 +71,7 @@ func mainCmd(args []string, stdout, stderr io.Writer) int {
 	case "set":
 		fs.StringVar(&o.print, "print", "", "on or off")
 		fs.StringVar(&o.dump, "dump", "", "on or off")
-		fs.StringVar(&o.iface, "iface", "", "lan, udp, all, or an interface name")
+		fs.StringVar(&o.iface, "iface", "", "which frames bootbridge prints: all, auto, lan, udp; -lan for all but lan")
 	default:
 		fmt.Fprintf(stderr, "bootbridgectl: unknown command %q\n", name)
 		usage(stderr)
@@ -119,11 +119,18 @@ commands:
   tail -f [flags]        tail, then keep printing live frames
   log [flags]            print frames live, like bootbridge -print
   dump [flags]           print frames live with a hex dump, like bootbridge -X
-    -i iface             only lan, only udp, or one named interface
+    -i what              which frames: auto (the default), all, lan or udp
     -t count             with tail -f: replay this many remembered frames first
     -n count             stop after this many frames
-  set [-print on|off] [-dump on|off] [-iface name]
+  set [-print on|off] [-dump on|off] [-iface what]
                          change the packet printing settings
+
+-i and -iface take all; auto, which is all but LAN traffic that has
+nothing to do with the UDP side (IPv6, spanning tree and LLDP, mDNS, SSDP
+and the like, and ARP about other hosts); lan or udp, the sides, also by
+their names; and with peers, a transport by name, any unique part of it,
+or l2tp or raw. A - or ! in front means everything else: -i -lan. The
+default is auto for frames and all for peers.
 
 Every command takes -socket path and -json to print the server's JSON
 lines unchanged. The control socket is bootbridge's -ctl path: its
@@ -345,6 +352,9 @@ func printStatus(w io.Writer, b []byte) error {
 
 func printState(print, dump bool, iface string) string {
 	if !print {
+		if iface != "" && iface != "all" {
+			return "off (" + iface + " when on)"
+		}
 		return "off"
 	}
 	if dump {

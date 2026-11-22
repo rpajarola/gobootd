@@ -243,6 +243,14 @@ Each endpoint has a UDP address, and frames go to its peers:
 
 ### Limits
 
+- **The host firewall must let the listeners' ports in:** UDP 1701 (or
+  whatever `-l2tp` uses), a raw listener's port if it is not on loopback,
+  and 5353 for the announcement. tcpdump captures before the firewall, so
+  a blocked datagram shows up there but nowhere in bootbridge: no peer is
+  learned and no `bootbridgectl stats` counter moves, not even the ones
+  for rejected datagrams. On Linux, for example:
+  `sudo nft add rule inet filter input udp dport { 1701, 5353 } accept`.
+
 - **Any frame is carried:** Ethernet II with any ethertype, and 802.3
   with LLC (RMP, RPL). The original HECnet bridge only forwards DEC
   ethertypes, so it cannot stand in for bootbridge, even though the

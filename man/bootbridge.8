@@ -371,6 +371,19 @@ runs as a service:
 .Sh AUTHORS
 .An Rico Pajarola Aq Mt rp@servium.ch
 .Sh CAVEATS
+A host firewall must let in the UDP ports of the listeners other machines
+use, 1701 for L2TPv3 in the examples, and 5353 for the announcement.
+A dropped datagram never reaches
+.Nm :
+.Xr tcpdump 8
+shows it arriving, since it captures before the firewall, but no peer is
+learned and no counter of
+.Xr bootbridgectl 1
+.Cm stats
+moves, not even the ones for datagrams that are rejected.
+On Linux, for example:
+.Dl # nft add rule inet filter input udp dport { 1701, 5353 } accept
+.Pp
 The announcement tells everyone on the network where the bridge is;
 without a cookie, anyone can then send it frames.
 .Fl announce Cm off

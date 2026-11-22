@@ -17,6 +17,7 @@ import (
 
 	// Protocols register themselves with the daemon.
 	_ "github.com/rpajarola/gobootd/internal/proto/bootparam"
+	_ "github.com/rpajarola/gobootd/internal/proto/dhcp"
 	_ "github.com/rpajarola/gobootd/internal/proto/nd"
 	_ "github.com/rpajarola/gobootd/internal/proto/nfs"
 	_ "github.com/rpajarola/gobootd/internal/proto/nis"

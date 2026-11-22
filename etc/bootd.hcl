@@ -81,6 +81,15 @@ service "bootparam" {
   # router      = "192.168.1.1"  # default: bootd's address on the network
 }
 service "nfs" {}
+# BOOTP and DHCP for the hosts below, with their fixed addresses. Unknown
+# clients are not answered, but enable it with care on a network with
+# another DHCP server: hosts without a services list may use every service.
+# service "dhcp" {
+#   routers    = ["192.168.1.1"]   # announced to clients on their subnet; default none
+#   dns        = ["192.168.1.1"]
+#   domain     = "lab"
+#   lease_time = 86400             # seconds
+# }
 # NIS for SunOS and friends. Maps are made from passwd, group, hosts,
 # aliases, ... (in /etc format) in the maps directory, plus the hosts below.
 # service "nis" {

@@ -26,7 +26,7 @@ clients, but not yet against real hardware.
 | NIS | SunOS and other YP clients | works (read only, no map transfer) |
 | RPL | IBM, 3Com DOS boot ROMs | planned |
 | MOP | DEC VAX, Alpha | planned |
-| BOOTP/DHCP | most | planned |
+| BOOTP/DHCP | most | works (fixed addresses for configured hosts) |
 | SMB1 | DOS clients after RPL | planned |
 | RBCS | 3Com 3Station | needs reverse engineering |
 
@@ -183,6 +183,17 @@ an IP address of bootd's own).
   to hosts that may use `nis`, so SunOS sets its domain name and starts
   ypbind. The files are read again on SIGHUP. `netgroup.byuser` and
   `netgroup.byhost` are not made, and maps cannot be pushed to slaves.
+- **BOOTP/DHCP** gives each host that may use `dhcp` its configured IP
+  address, with bootd as the TFTP server (`siaddr`), the host's first file
+  as the boot file (or the file matching the name the client asks for),
+  its name, the subnet mask and broadcast address, the routers on its
+  subnet, DNS servers and domain, and its `export "root"` as root path
+  (`server:path`, as Linux and the BSDs expect). Hosts that may use `nis`
+  also get the NIS domain and server. There is no address pool: unknown
+  clients get no answer, so bootd can share a network with another DHCP
+  server, and requests naming another server are left to it. Replies go
+  straight to the client's Ethernet address, or are broadcast if it asks.
+  Relay agents are not supported.
 - **TFTP** identifies clients by IP address. A request for a path such as
   `/tftpboot/name` also matches a file named `name`. Requests sent to a
   broadcast address are answered too, but refusals of broadcast requests are

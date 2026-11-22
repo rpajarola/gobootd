@@ -275,6 +275,36 @@ The directory with the source files.
 The master's name, added to the hosts maps.
 The default is the host name up to the first dot.
 .El
+.It Ic service Qq dhcp
+BOOTP and DHCP.
+Clients are identified by Ethernet address and get the host's IP address;
+there is no address pool.
+The reply names bootd as the TFTP server, and the host's first file as the
+boot file, or the file matching the name the client asks for.
+It also carries the host's name, the subnet mask and broadcast address,
+and the host's
+.Ic export Qq root
+as root path,
+.Ar server : Ns Ar path .
+Hosts that may use
+.Ic nis
+also get the NIS domain and bootd as NIS server.
+BOOTP clients get these options in RFC 1048 format if their vendor area
+has the magic cookie or is empty.
+Unknown clients get no answer, and requests that name another server are
+left to it, so that bootd can share a network with another DHCP server.
+Requests through relay agents are not answered.
+.Bl -tag -width Ds
+.It Ic routers No = Ar list
+Routers announced to clients on their subnet.
+The default is none.
+.It Ic dns No = Ar list
+Name servers announced to clients.
+.It Ic domain No = Ar string
+The DNS domain announced to clients.
+.It Ic lease_time No = Ar seconds
+The default is 86400, one day.
+.El
 .El
 .El
 .Sh HOSTS AND CLASSES

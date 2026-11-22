@@ -129,8 +129,8 @@ func TestNetBSDSparc(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "root", "netbsd")); err != nil {
 		t.Skip("no NetBSD netboot files: run fetch-netbsd.sh")
 	}
-	// The kernel first waits about 30 seconds for DHCP, which bootd
-	// does not answer yet.
+	// The kernel first waits about 30 seconds for DHCP, which is not
+	// enabled here.
 	bootSS5(t, prom, qemu, dir, 6*time.Minute, `
 service "rarp" {}
 service "tftp" {}

@@ -20,6 +20,7 @@ network "lab" {
 # service "tftp" {}
 # service "bootparam" {}
 # service "nfs" {}
+# service "dhcp" {}
 
 # host "kali" {
 #   mac      = "08:00:20:01:02:03"

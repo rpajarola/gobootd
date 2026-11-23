@@ -12,7 +12,9 @@ import (
 
 	"github.com/rpajarola/gobootd/internal/daemon"
 	"github.com/rpajarola/gobootd/internal/inventory"
+	"github.com/rpajarola/gobootd/internal/proto/pubfs"
 	"github.com/rpajarola/gobootd/internal/resolve"
+	"github.com/rpajarola/gobootd/internal/service"
 )
 
 func check(path string, quiet bool, stdout, stderr io.Writer) int {
@@ -173,6 +175,9 @@ func explain(path string, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 3 {
 		name = args[2]
 	}
+	if svc == service.HTTP || svc == service.FTP {
+		return explainPath(stdout, h, svc, name)
+	}
 	f, kind, err := h.FileIgnoringDir(svc, name)
 	if err != nil {
 		fmt.Fprintf(stdout, "%s request from %s denied (%v)\n", svc, h.Name, err)
@@ -216,4 +221,39 @@ func hostNames(inv *inventory.Inventory) string {
 		names = append(names, h.Name)
 	}
 	return strings.Join(names, ", ")
+}
+
+// explainPath shows what a path leads to over HTTP or FTP.
+func explainPath(w io.Writer, h *inventory.Host, svc, name string) int {
+	t := pubfs.New(h, svc)
+	p := pubfs.Clean(name)
+	fi, err := t.Stat(p)
+	if err != nil {
+		fmt.Fprintf(w, "%s request from %s for %s denied (%v)\n", svc, h.Name, p, err)
+		return 1
+	}
+	if fi.IsDir() {
+		list, err := t.ReadDir(p)
+		if err != nil {
+			fmt.Fprintf(w, "%s listing of %s for %s failed (%v)\n", svc, p, h.Name, err)
+			return 1
+		}
+		fmt.Fprintf(w, "%s is a directory:\n", p)
+		for _, e := range list {
+			n := e.Name()
+			if e.IsDir() {
+				n += "/"
+			}
+			fmt.Fprintf(w, "  %s\n", n)
+		}
+		return 0
+	}
+	f, err := t.Open(p)
+	if err != nil {
+		fmt.Fprintf(w, "%s request from %s for %s denied (%v)\n", svc, h.Name, p, err)
+		return 1
+	}
+	defer f.Close()
+	fmt.Fprintf(w, "%s serves %s (%d bytes)\n", p, f.Source, f.Info.Size())
+	return 0
 }

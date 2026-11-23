@@ -307,6 +307,53 @@ The DNS domain announced to clients.
 .It Ic lease_time No = Ar seconds
 The default is 86400, one day.
 .El
+.It Ic service Qq http
+HTTP/1.1, read only, for installers that fetch their files by URL, such
+as NetBSD's sysinst or a Solaris flash archive.
+As with WebNFS, a URL's path is the path an NFS client would mount: an
+.Ic export
+with
+.Ic export_path
+.Pa /pub/netbsd
+holds
+.Pa http://server/pub/netbsd/amd64/binary/sets/ .
+The host's
+.Ic file Ns s
+are at the top, under their names and aliases, but not under a
+.Qq *
+name.
+Directories are listed, including those above the export paths, and
+ranges are served.
+There are no index pages or CGI programs, so Solaris WAN boot's
+.Pa wanboot-cgi
+cannot be served.
+Clients are identified by IP address; exports with a
+.Ic server
+are left out.
+Symbolic links may not lead out of their export, and an export's
+.Ic spec
+is not used.
+.Bl -tag -width Ds
+.It Ic port No = Ar number
+The default is 80.
+.El
+.It Ic service Qq ftp
+Anonymous FTP, read only, with the same files and paths as
+.Ic http .
+The users
+.Qq anonymous
+and
+.Qq ftp
+log in with any password; there are no others.
+Passive (PASV, EPSV) and active (PORT, EPRT) data connections work, but
+active ones only to the client's own address.
+SIZE, MDTM and REST are understood, so interrupted transfers can be
+resumed.
+.Bl -tag -width Ds
+.It Ic port No = Ar number
+The control port.
+The default is 21.
+.El
 .El
 .El
 .Sh HOSTS AND CLASSES
@@ -427,10 +474,12 @@ Let the client write to the disk, e.g. its root and swap.
 The default is false; writes to read-only disks get an error.
 .El
 .It Ic export Qo Ar name Qc Brq ...
-A directory served over NFS and announced by bootparam, usually
+A directory or file served over NFS and announced by bootparam, usually
 .Qq root
 and
-.Qq swap .
+.Qq swap ,
+and served over HTTP and FTP at its
+.Ic export_path .
 .Bl -tag -width Ds
 .It Ic path No = Ar path
 Required.
@@ -510,6 +559,27 @@ host "sun2" {
   export "root" {
     path = "/export/hosts/sun2/root"
     spec = "/export/hosts/sun2/root.mtree"
+  }
+}
+.Ed
+.Pp
+A NetBSD install server: sysinst fetches the sets from
+.Pa http://192.168.1.250/pub/netbsd-10.1/amd64/binary/sets/
+or over FTP from the same path, and the miniroot kernel is at
+.Pa /netbsd-INSTALL.gz :
+.Bd -literal -offset indent
+service "http" {}
+service "ftp" {}
+
+host "newbox" {
+  mac      = "52:54:00:12:34:56"
+  ip       = "192.168.1.20"
+  services = ["dhcp", "tftp", "http", "ftp"]
+  file "netbsd/pxeboot_ia32.bin" {}
+  file "netbsd/netbsd-INSTALL.gz" {}
+  export "netbsd" {
+    path        = "/srv/netbsd-10.1"
+    export_path = "/pub/netbsd-10.1"
   }
 }
 .Ed

@@ -27,6 +27,8 @@ clients, but not yet against real hardware.
 | RPL | IBM, 3Com DOS boot ROMs | planned |
 | MOP | DEC VAX, Alpha | planned |
 | BOOTP/DHCP | most | works (fixed addresses for configured hosts) |
+| HTTP | NetBSD, Solaris installers | works (read only, GET and HEAD with ranges) |
+| FTP | NetBSD, Solaris installers | works (anonymous, read only, passive and active) |
 | SMB1 | DOS clients after RPL | planned |
 | RBCS | 3Com 3Station | needs reverse engineering |
 
@@ -202,6 +204,19 @@ an IP address of bootd's own).
   the host's first file. Requests sent to a
   broadcast address are answered too, but refusals of broadcast requests are
   only logged, so another server can answer.
+
+- **HTTP** and **FTP** serve the same read-only tree, for installers that
+  fetch their sets or archives by URL. As with WebNFS, paths are the ones
+  NFS clients mount: `export "sets" { path = "/srv/netbsd-10.1",
+  export_path = "/pub/netbsd-10.1" }` is
+  `http://server/pub/netbsd-10.1/` and `ftp://server/pub/netbsd-10.1/`.
+  The host's files are at the top under their names and aliases (not under
+  `"*"`), and directories are listed down to the exports. Clients are
+  identified by IP address, like everywhere else. HTTP answers GET and
+  HEAD, with ranges; there is no CGI, so Solaris WAN boot's `wanboot-cgi`
+  is not supported. FTP logs in `anonymous` or `ftp` with any password,
+  and has passive and active mode (active only to the client itself),
+  SIZE, MDTM and REST.
 
 Guides for particular machines: [MVME187](docs/mvme187.md).
 

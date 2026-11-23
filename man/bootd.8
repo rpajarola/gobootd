@@ -52,6 +52,10 @@ NFS version 2 and MOUNT version 1 over UDP, read only.
 NIS (YP), read only, without map transfers.
 .It Cm dhcp
 BOOTP and DHCP, with fixed addresses for configured hosts.
+.It Cm http
+HTTP, read only, for installers that fetch their files by URL.
+.It Cm ftp
+Anonymous FTP, read only, for the same.
 .El
 .Pp
 .Nm
@@ -95,6 +99,12 @@ also whether the service is enabled and allowed for the host, and which
 file it would serve; with
 .Ar file ,
 which file a request for that name would get.
+For
+.Cm http
+and
+.Cm ftp ,
+.Ar file
+is a path, and a directory is listed.
 .It Cm version
 Print the version.
 .El
@@ -194,6 +204,22 @@ qemu-system-sparc ... -netdev dgram,id=n0,local.type=inet,\e
 .%T NFS: Network File System Protocol Specification
 .Re
 .Rs
+.%R RFC 959
+.%T File Transfer Protocol (FTP)
+.Re
+.Rs
+.%R RFC 2428
+.%T FTP Extensions for IPv6 and NATs
+.Re
+.Rs
+.%R RFC 3659
+.%T Extensions to FTP
+.Re
+.Rs
+.%R RFC 9112
+.%T HTTP/1.1
+.Re
+.Rs
 .%R RFC 3931
 .%T Layer Two Tunneling Protocol - Version 3 (L2TPv3)
 .Re
@@ -204,8 +230,8 @@ It is not a drop-in replacement.
 .Sh AUTHORS
 .An Rico Pajarola Aq Mt rp@servium.ch
 .Sh BUGS
-NFS, ND and TFTP are read only: writable exports and disks are not
-written to.
+NFS, ND, TFTP, HTTP and FTP are read only: writable exports and disks
+are not written to.
 NIS cannot transfer maps to slave servers, and does not make
 .Pa netgroup.byuser
 and

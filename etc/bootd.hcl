@@ -97,6 +97,16 @@ service "nfs" {}
 #   maps        = "yp"       # relative to root
 #   server_name = "aiax"     # NIS master name, added to hosts; default: host name
 # }
+# HTTP and anonymous FTP, read only, for installers (NetBSD's sysinst,
+# Solaris flash archives). Paths are export paths, as with WebNFS: an export
+# with export_path = "/pub/netbsd" is http://server/pub/netbsd/. The host's
+# files are at the top, under their names.
+# service "http" {
+#   port = 80
+# }
+# service "ftp" {
+#   port = 21     # control port; data connections are passive or active
+# }
 
 # HP 9000/300 and /400: RMP picks the class by the machine type the boot
 # ROM sends (an HP 425t sends "HPS300"), so new machines boot without a host

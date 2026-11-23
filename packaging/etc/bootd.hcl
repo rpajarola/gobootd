@@ -21,6 +21,8 @@ network "lab" {
 # service "bootparam" {}
 # service "nfs" {}
 # service "dhcp" {}
+# service "http" {}   # exports at their export_path, files at the top
+# service "ftp" {}    # anonymous, the same files as http
 
 # host "kali" {
 #   mac      = "08:00:20:01:02:03"

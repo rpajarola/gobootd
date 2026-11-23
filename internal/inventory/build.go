@@ -21,7 +21,7 @@ import (
 // know the client's IP address.
 var (
 	needsMAC = []string{service.RARP, service.RMP, service.MOP, service.ND, service.RPL, service.DHCP, service.RBCS}
-	needsIP  = []string{service.RARP, service.ND, service.DHCP, service.TFTP, service.Bootparam, service.NFS, service.NIS, service.SMB}
+	needsIP  = []string{service.RARP, service.ND, service.DHCP, service.TFTP, service.Bootparam, service.NFS, service.NIS, service.HTTP, service.FTP, service.SMB}
 )
 
 // Build creates an inventory from a parsed configuration, looking up missing
@@ -259,7 +259,7 @@ func (b *builder) checkHost(h *Host) {
 		}
 	}
 	unused(len(h.Disks), "disk", service.ND)
-	unused(len(h.Exports), "export", service.NFS, service.Bootparam)
+	unused(len(h.Exports), "export", service.NFS, service.Bootparam, service.HTTP, service.FTP)
 	unused(len(h.Shares), "share", service.SMB)
 	if len(h.Exports) == 0 {
 		for _, svc := range intersect(h.Services, []string{service.Bootparam, service.NFS}) {

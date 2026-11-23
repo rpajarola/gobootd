@@ -234,4 +234,3 @@ func TestFTPDenied(t *testing.T) {
 		t.Error("denial not logged")
 	}
 }
-

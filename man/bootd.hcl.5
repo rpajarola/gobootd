@@ -189,7 +189,9 @@ Clients are identified by IP address.
 A request for a path such as
 .Pa /tftpboot/name
 also matches a file named
-.Pa name .
+.Pa name ,
+and a request with an empty name, as 187Bug sends when no boot file name
+is set, gets the host's first file.
 Refusals of requests sent to a broadcast address are only logged, so that
 another server can answer.
 .Bl -tag -width Ds

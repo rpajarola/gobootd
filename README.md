@@ -197,9 +197,13 @@ an IP address of bootd's own).
   straight to the client's Ethernet address, or are broadcast if it asks.
   Relay agents are not supported.
 - **TFTP** identifies clients by IP address. A request for a path such as
-  `/tftpboot/name` also matches a file named `name`. Requests sent to a
+  `/tftpboot/name` also matches a file named `name`, and a request with an
+  empty name, which 187Bug sends when it has no boot file name set, gets
+  the host's first file. Requests sent to a
   broadcast address are answered too, but refusals of broadcast requests are
   only logged, so another server can answer.
+
+Guides for particular machines: [MVME187](docs/mvme187.md).
 
 Options for each protocol are listed in [`etc/bootd.hcl`](etc/bootd.hcl).
 The manual pages [bootd(8)](man/bootd.8), [bootbridge(8)](man/bootbridge.8),

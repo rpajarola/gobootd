@@ -219,7 +219,7 @@ func TestMountAndRead(t *testing.T) {
 		t.Errorf("statfs: status %d tsize %d", st, tsize)
 	}
 	// Writing is refused.
-	res = c.call(NFSProg, NFSVers, procCreate, (&oncrpc.Encoder{}).Fixed(root).String("x"))
+	res = c.call(NFSProg, NFSVers, procCreate, sattrArgs((&oncrpc.Encoder{}).Fixed(root).String("x"), 0o644, unset, unset, unset))
 	if st := res.Uint32(); st != errRofs {
 		t.Errorf("create: status %d, want read-only file system", st)
 	}

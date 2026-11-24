@@ -22,7 +22,7 @@ clients, but not yet against real hardware.
 | ND | Sun-2 | works (diskless SunOS 2.0) |
 | TFTP | most | works (read only; blksize, tsize, timeout options) |
 | bootparam | SunOS, NetBSD, Solaris | works (with a built-in portmapper) |
-| NFSv2 | diskless root/swap | works (read only, MOUNT v1) |
+| NFSv2 | diskless root/swap | works (writable exports, MOUNT v1) |
 | NIS | SunOS and other YP clients | works (read only, no map transfer) |
 | RPL | IBM, 3Com DOS boot ROMs | planned |
 | MOP | DEC VAX, Alpha | planned |
@@ -174,8 +174,15 @@ an IP address of bootd's own).
   the export a `spec`, an mtree(5) file such as
   `tar -cf root.mtree --format=mtree @root.tgz` makes, and bootd serves the
   owners, modes, devices and symlinks it lists. `export_path` sets the path
-  clients see; NetBSD keeps `server:path` in 90 bytes. Writes are not
-  supported yet.
+  clients see; NetBSD keeps `server:path` in 90 bytes. A `writable` export
+  is changed on disk, but what bootd cannot set without privileges (owners
+  other than its own, device nodes, modes that would lock it out) is kept
+  in the spec, by default `<path>.mtree` next to the export, which bootd
+  saves a second after it changes. So a client can unpack its own sets and
+  run MAKEDEV on a root bootd serves as an ordinary user; as root, bootd
+  sets owners (and on Linux, device nodes) on disk. Retransmitted calls get the first
+  answer. Writes are not synced to disk before the answer unless the nfs
+  service has `sync = true`.
 - **NIS** serves one domain to hosts that may use `nis`. The maps are made
   from files in `/etc` format in the `maps` directory (`passwd`, `group`,
   `hosts`, `ethers`, `netgroup`, `services`, `protocols`, `rpc`,

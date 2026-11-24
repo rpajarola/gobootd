@@ -47,7 +47,7 @@ Sun bootparam, with a built-in portmapper that answers broadcast
 .Dv CALLIT
 requests.
 .It Cm nfs
-NFS version 2 and MOUNT version 1 over UDP, read only.
+NFS version 2 and MOUNT version 1 over UDP, with writable exports.
 .It Cm nis
 NIS (YP), read only, without map transfers.
 .It Cm dhcp
@@ -230,8 +230,8 @@ It is not a drop-in replacement.
 .Sh AUTHORS
 .An Rico Pajarola Aq Mt rp@servium.ch
 .Sh BUGS
-NFS, ND, TFTP, HTTP and FTP are read only: writable exports and disks
-are not written to.
+TFTP, HTTP and FTP are read only.
+NFS is version 2 over UDP only.
 NIS cannot transfer maps to slave servers, and does not make
 .Pa netgroup.byuser
 and

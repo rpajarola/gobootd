@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // specEntry is what an mtree specification says about one file.
@@ -20,6 +22,8 @@ type specEntry struct {
 	major    uint32
 	minor    uint32
 	link     string
+	mtime    time.Time
+	hasTime  bool
 }
 
 // spec maps paths relative to an export ("." for its top) to entries.
@@ -125,6 +129,18 @@ func parseEntry(kw map[string]string) (*specEntry, error) {
 			return nil, err
 		}
 	}
+	if v, ok := kw["time"]; ok {
+		sec, nsec, _ := strings.Cut(v, ".")
+		s, err1 := strconv.ParseInt(sec, 10, 64)
+		ns, err2 := int64(0), error(nil)
+		if nsec != "" {
+			ns, err2 = strconv.ParseInt(nsec, 10, 64)
+		}
+		if err1 != nil || err2 != nil {
+			return nil, fmt.Errorf("time %q", v)
+		}
+		e.mtime, e.hasTime = time.Unix(s, ns), true
+	}
 	if v, ok := kw["link"]; ok {
 		if e.link, err = unvis(v); err != nil {
 			return nil, err
@@ -218,4 +234,67 @@ func isOctal(s string) bool {
 // decode it: major in bits 8-19, minor in bits 0-7 and 20-31.
 func rdev(major, minor uint32) uint32 {
 	return (major<<8)&0x000fff00 | minor&0xff | (minor<<12)&0xfff00000
+}
+
+// empty reports whether an entry says nothing the disk does not: a file
+// on disk with its own owner and mode.
+func (e *specEntry) empty() bool {
+	return !e.isVirtual() && !e.hasMode && !e.hasUID && !e.hasGID
+}
+
+// write writes the specification in the full path form bsdtar writes,
+// sorted by path. Entries that say nothing are left out.
+func (s spec) write(w io.Writer) error {
+	paths := make([]string, 0, len(s))
+	for p, e := range s {
+		if !e.empty() {
+			paths = append(paths, p)
+		}
+	}
+	slices.Sort(paths)
+	bw := bufio.NewWriter(w)
+	bw.WriteString("#mtree\n")
+	for _, p := range paths {
+		e := s[p]
+		name := "."
+		if p != "." {
+			name = "./" + vis(p)
+		}
+		fmt.Fprintf(bw, "%s type=%s", name, e.typ)
+		if e.hasMode {
+			fmt.Fprintf(bw, " mode=%o", e.mode)
+		}
+		if e.hasUID {
+			fmt.Fprintf(bw, " uid=%d", e.uid)
+		}
+		if e.hasGID {
+			fmt.Fprintf(bw, " gid=%d", e.gid)
+		}
+		if e.typ == "char" || e.typ == "block" {
+			fmt.Fprintf(bw, " device=native,%d,%d", e.major, e.minor)
+		}
+		if e.typ == "link" && e.link != "" {
+			fmt.Fprintf(bw, " link=%s", vis(e.link))
+		}
+		if e.hasTime {
+			fmt.Fprintf(bw, " time=%d.%09d", e.mtime.Unix(), e.mtime.Nanosecond())
+		}
+		bw.WriteString("\n")
+	}
+	return bw.Flush()
+}
+
+// vis escapes a name the way unvis decodes it: white space, the
+// backslash, '#', '=' and anything not printable ASCII as octal.
+func vis(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c <= ' ' || c >= 0x7f || c == '\\' || c == '#' || c == '=' {
+			fmt.Fprintf(&b, "\\%03o", c)
+			continue
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
 }

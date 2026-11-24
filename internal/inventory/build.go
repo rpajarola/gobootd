@@ -337,9 +337,21 @@ func (b *builder) exports(cs []*config.Export) []*Export {
 			b.warn(&c.DefRange, "Long export path", "Export path %s is %d characters long; NetBSD clients keep \"server:path\" in 90 bytes. Set a shorter export_path.", e.ExportPath, len(e.ExportPath))
 		}
 		b.exists(e.Path, &c.DefRange)
-		if c.Spec != "" {
+		switch {
+		case c.Spec != "" && c.Writable:
+			e.Spec = b.path(c.Spec) // created when needed
+		case c.Spec != "":
 			e.Spec = b.path(c.Spec)
 			b.exists(e.Spec, &c.SpecRange)
+		default:
+			// A writable directory keeps what the disk cannot hold
+			// next to it; the same file is read when it is not
+			// writable any more.
+			sidecar := e.Path + ".mtree"
+			_, err := os.Stat(sidecar)
+			if st, serr := os.Stat(e.Path); serr == nil && st.IsDir() && (c.Writable || err == nil) {
+				e.Spec = sidecar
+			}
 		}
 		out = append(out, e)
 	}

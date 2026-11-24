@@ -80,7 +80,9 @@ service "bootparam" {
   # domain      = ""             # NIS domain; default: the nis service's, for hosts using nis
   # router      = "192.168.1.1"  # default: bootd's address on the network
 }
-service "nfs" {}
+service "nfs" {
+  # sync = false   # true: fsync each write before answering, as NFSv2 requires (slow)
+}
 # BOOTP and DHCP for the hosts below, with their fixed addresses. Unknown
 # clients are not answered, but enable it with care on a network with
 # another DHCP server: hosts without a services list may use every service.
@@ -127,7 +129,12 @@ host "nesta" {
   class = "hp300"
   # mac = "08:00:09:12:34:56"   # otherwise from /etc/ethers
 
-  export "root" { path = "/export/hosts/nesta/root" }
+  # A writable root keeps owners and device nodes bootd cannot set in
+  # root.mtree next to it.
+  export "root" {
+    path     = "/export/hosts/nesta/root"
+    writable = true
+  }
   export "swap" {
     path     = "/export/hosts/nesta/swap"
     writable = true

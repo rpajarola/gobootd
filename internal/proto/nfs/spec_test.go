@@ -1,11 +1,13 @@
 package nfs
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rpajarola/gobootd/internal/oncrpc"
 	"github.com/rpajarola/gobootd/internal/proto/prototest"
@@ -136,5 +138,34 @@ host "kali" {
 	h, _ := decodeHandle(fh)
 	if p, _, err := s.files.resolve(x, h); err != nil || p != "dev/console" {
 		t.Errorf("resolve virtual handle: %q, %v", p, err)
+	}
+}
+
+func TestSpecWriteRoundTrip(t *testing.T) {
+	in := spec{
+		".":            {typ: "dir", mode: 0o755, hasMode: true, uid: 0, hasUID: true},
+		"dev/sd0a":     {typ: "block", mode: 0o640, hasMode: true, uid: 0, hasUID: true, gid: 5, hasGID: true, major: 7, minor: 0x10003},
+		"etc/a b#=\\c": {typ: "file", uid: 3, hasUID: true},
+		"bin/sh":       {typ: "link", link: "/bin/a b", mtime: time.Unix(1700000000, 5), hasTime: true},
+		"plain":        {typ: "file"}, // says nothing: left out
+	}
+	var buf bytes.Buffer
+	if err := in.write(&buf); err != nil {
+		t.Fatal(err)
+	}
+	out, err := parseSpec(&buf)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, buf.String())
+	}
+	delete(in, "plain")
+	if len(out) != len(in) {
+		t.Fatalf("got %d entries, want %d:\n%s", len(out), len(in), buf.String())
+	}
+	for p, want := range in {
+		got := out[p]
+		if got == nil || got.typ != want.typ || got.mode != want.mode || got.uid != want.uid || got.gid != want.gid ||
+			got.major != want.major || got.minor != want.minor || got.link != want.link || !got.mtime.Equal(want.mtime) {
+			t.Errorf("%q: got %+v, want %+v", p, got, want)
+		}
 	}
 }

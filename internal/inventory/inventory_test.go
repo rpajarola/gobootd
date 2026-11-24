@@ -383,3 +383,38 @@ host "kali" {}`, "may use bootparam, but has no export entries"},
 		})
 	}
 }
+
+// A writable export keeps its spec next to it unless one is given, and
+// the file is still read once the export is read only again.
+func TestExportSpec(t *testing.T) {
+	inv := mustBuild(t, `
+service "nfs" {}
+host "kali" {
+  export "root" {
+    path     = "root"
+    writable = true
+  }
+  export "usr"  { path = "usr" }
+  export "opt"  { path = "opt" }
+  export "swap" {
+    path     = "swap"
+    writable = true
+  }
+  export "var" {
+    path     = "var"
+    writable = true
+    spec     = "specs/var.mtree"
+  }
+}`, "root/x", "usr/x", "opt/x", "opt.mtree", "swap", "var/x")
+	h, _ := inv.ByName("kali")
+	want := map[string]string{"root": "root.mtree", "usr": "", "opt": "opt.mtree", "swap": "", "var": "specs/var.mtree"}
+	for _, x := range h.Exports {
+		got := ""
+		if x.Spec != "" {
+			got, _ = filepath.Rel(inv.Root, x.Spec)
+		}
+		if got != want[x.Name] {
+			t.Errorf("export %s: spec %q, want %q", x.Name, got, want[x.Name])
+		}
+	}
+}

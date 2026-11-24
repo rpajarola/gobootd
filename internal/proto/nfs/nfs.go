@@ -4,8 +4,7 @@
 // configuration: a client may only mount its own exports, and only see the
 // files inside them.
 //
-// The server is read-only for now; anything that would change a file is
-// answered with "read-only file system".
+// Exports are read only unless they are writable; see write.go.
 package nfs
 
 import (
@@ -95,10 +94,22 @@ const (
 	typeLnk = 5
 )
 
+// Options are the settings in the nfs service block.
+type Options struct {
+	// Sync writes data to disk before answering a WRITE, as NFSv2
+	// demands. Without it a server crash can lose acknowledged writes.
+	Sync bool `hcl:"sync,optional"`
+}
+
 // Server serves exports over NFS.
 type Server struct {
+	opts  Options
 	files *files
+	dup   drc
 }
+
+// Options implements daemon.Configurable.
+func (s *Server) Options() any { return &s.opts }
 
 // Run implements daemon.Service.
 func (s *Server) Run(ctx context.Context, env *daemon.Env) error {
@@ -106,6 +117,7 @@ func (s *Server) Run(ctx context.Context, env *daemon.Env) error {
 		return errors.New("no network")
 	}
 	s.files = newFiles()
+	s.files.log = env.Log
 	defer s.files.close()
 	for _, n := range env.Networks {
 		defer n.RPC.Register(s.mountProgram(env, n))()
@@ -121,6 +133,8 @@ type request struct {
 	*oncrpc.Call
 	host *inventory.Host
 	log  *slog.Logger
+	// writable is set by file if the handle is in a writable export.
+	writable bool
 }
 
 // client finds the host making the call. Calls from unknown hosts, or
@@ -207,24 +221,28 @@ func (s *Server) nfsProgram(env *daemon.Env, n *netif.Network) *oncrpc.Program {
 			return res, nil
 		}
 	}
-	rofs := func(r *request) []byte { return (&oncrpc.Encoder{}).Uint32(errRofs).Bytes() }
+	// Calls that cannot be repeated are answered once.
+	once := func(name string, fn func(*request) []byte) oncrpc.Proc {
+		p := proc(name, fn)
+		return func(c *oncrpc.Call) ([]byte, error) { return s.dup.do(c, func() ([]byte, error) { return p(c) }) }
+	}
 	void := func(*request) []byte { return nil }
 	return &oncrpc.Program{Prog: NFSProg, Vers: NFSVers, Procs: map[uint32]oncrpc.Proc{
 		procGetattr:    proc("getattr", s.getattr),
-		procSetattr:    proc("setattr", rofs),
+		procSetattr:    proc("setattr", s.setattr),
 		procRoot:       proc("root", void),
 		procLookup:     proc("lookup", s.lookup),
 		procReadlink:   proc("readlink", s.readlink),
 		procRead:       proc("read", s.read),
 		procWritecache: proc("writecache", void),
-		procWrite:      proc("write", rofs),
-		procCreate:     proc("create", rofs),
-		procRemove:     proc("remove", rofs),
-		procRename:     proc("rename", rofs),
-		procLink:       proc("link", rofs),
-		procSymlink:    proc("symlink", rofs),
-		procMkdir:      proc("mkdir", rofs),
-		procRmdir:      proc("rmdir", rofs),
+		procWrite:      proc("write", s.write),
+		procCreate:     once("create", s.create),
+		procRemove:     once("remove", s.remove),
+		procRename:     once("rename", s.rename),
+		procLink:       once("link", s.link),
+		procSymlink:    once("symlink", s.symlink),
+		procMkdir:      once("mkdir", s.mkdir),
+		procRmdir:      once("rmdir", s.rmdir),
 		procReaddir:    proc("readdir", s.readdir),
 		procStatfs:     proc("statfs", s.statfs),
 	}}
@@ -249,6 +267,7 @@ func (s *Server) file(r *request) (*export, string, fs.FileInfo, uint32) {
 		if err != nil {
 			return nil, "", nil, status(err)
 		}
+		r.writable = e.Writable
 		return x, p, fi, nfsOK
 	}
 	r.log.Info(fmt.Sprintf("nfs request from %s denied (file handle not in its exports)", r.host.Name))
@@ -436,7 +455,31 @@ func fattr(e *oncrpc.Encoder, x *export, fi fs.FileInfo) {
 // status converts an error to an NFS status.
 func status(err error) uint32 {
 	var errno syscall.Errno
+	var se statusErr
+	if errors.As(err, &se) {
+		return uint32(se)
+	}
+	if errors.As(err, &errno) {
+		switch errno {
+		case syscall.EEXIST:
+			return errExist
+		case syscall.ENOTEMPTY:
+			return errNotempty
+		case syscall.ENOSPC:
+			return errNospc
+		case syscall.EDQUOT:
+			return errDquot
+		case syscall.EFBIG:
+			return errFbig
+		case syscall.EROFS:
+			return errRofs
+		case syscall.EIO, syscall.EINVAL, syscall.EXDEV, syscall.ELOOP:
+			return errIO
+		}
+	}
 	switch {
+	case errors.Is(err, fs.ErrExist):
+		return errExist
 	case errors.Is(err, errStale):
 		return errStaleCode
 	case errors.Is(err, fs.ErrNotExist):

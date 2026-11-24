@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path"
 	"path/filepath"
@@ -30,14 +31,24 @@ type export struct {
 	root *os.Root
 	// file is the name of the exported file in root, or "" for a
 	// directory export.
-	file string
+	file  string
+	mtime time.Time
+
+	// mu guards spec, virtual and vinos, which writes change.
+	mu sync.RWMutex
 	// spec overrides attributes and adds device nodes, fifos and
 	// symlinks that are not on disk.
 	spec spec
 	// virtual lists, by directory, the spec entries that are not on
 	// disk.
 	virtual map[string][]string
-	mtime   time.Time
+	// vinos keeps the inode numbers of renamed virtual files.
+	vinos map[string]uint64
+	// specPath is where the spec is read from and saved to.
+	specPath string
+	saver    saver
+	dirty    bool
+	log      *slog.Logger
 }
 
 // rel converts a path relative to the export to one relative to root.
@@ -79,6 +90,7 @@ func decodeHandle(b []byte) (handle, bool) {
 // files maps file handles to paths. Handles stay valid across restarts:
 // a handle that is not in the table is found again by walking its export.
 type files struct {
+	log     *slog.Logger
 	mu      sync.Mutex
 	exports map[string]*export // by path
 	paths   map[handle]string  // path relative to the export, "." for its top
@@ -101,12 +113,16 @@ func (t *files) open(p, specPath string) (*export, error) {
 	if err != nil {
 		return nil, err
 	}
-	x := &export{id: exportID(p), path: p, mtime: st.ModTime()}
+	x := &export{id: exportID(p), path: p, mtime: st.ModTime(), spec: spec{}, virtual: map[string][]string{}, vinos: map[string]uint64{}, log: t.log}
+	if x.log == nil {
+		x.log = slog.Default()
+	}
 	dir := p
 	if !st.IsDir() {
 		dir, x.file = filepath.Split(p)
 	}
 	if specPath != "" && x.file == "" {
+		x.specPath = specPath
 		if err := x.loadSpec(specPath); err != nil {
 			return nil, fmt.Errorf("spec %s: %w", specPath, err)
 		}
@@ -118,8 +134,14 @@ func (t *files) open(p, specPath string) (*export, error) {
 	return x, nil
 }
 
+// loadSpec reads the spec. A missing spec is empty: a writable export
+// creates it when a client sets what the disk cannot hold.
 func (x *export) loadSpec(specPath string) error {
+	x.spec, x.virtual, x.vinos = spec{}, map[string][]string{}, map[string]uint64{}
 	f, err := os.Open(specPath)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -127,7 +149,6 @@ func (x *export) loadSpec(specPath string) error {
 	if x.spec, err = parseSpec(f); err != nil {
 		return err
 	}
-	x.virtual = map[string][]string{}
 	for p, e := range x.spec {
 		if !e.isVirtual() || p == "." {
 			continue
@@ -146,6 +167,7 @@ func (t *files) close() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for _, x := range t.exports {
+		x.saver.flush(x)
 		x.root.Close()
 	}
 	t.exports = map[string]*export{}
@@ -154,6 +176,12 @@ func (t *files) close() {
 // lstat returns information about p in x, with the attributes of the spec
 // applied. Spec entries that are not on disk are virtual files.
 func (x *export) lstat(p string) (fs.FileInfo, error) {
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+	return x.lstatLocked(p)
+}
+
+func (x *export) lstatLocked(p string) (fs.FileInfo, error) {
 	fi, err := x.root.Lstat(x.rel(p))
 	e := x.spec[p]
 	switch {
@@ -192,7 +220,9 @@ func (x *export) names(dir string) ([]string, error) {
 	for _, de := range ents {
 		names = append(names, de.Name())
 	}
+	x.mu.RLock()
 	names = append(names, x.virtual[dir]...)
+	x.mu.RUnlock()
 	sort.Strings(names)
 	return names, nil
 }
@@ -227,21 +257,27 @@ func (t *files) resolve(x *export, h handle) (string, fs.FileInfo, error) {
 		return "", nil, errStale
 	}
 	if h.ino&virtualIno != 0 {
+		x.mu.RLock()
+		var vp string
 		for dir, names := range x.virtual {
 			for _, n := range names {
-				if p := path.Join(dir, n); vino(p) == h.ino {
-					fi, err := x.lstat(p)
-					if err != nil {
-						return "", nil, errStale
-					}
-					t.mu.Lock()
-					t.paths[h] = p
-					t.mu.Unlock()
-					return p, fi, nil
+				if p := path.Join(dir, n); x.inoOf(p) == h.ino {
+					vp = p
 				}
 			}
 		}
-		return "", nil, errStale
+		x.mu.RUnlock()
+		if vp == "" {
+			return "", nil, errStale
+		}
+		fi, err := x.lstat(vp)
+		if err != nil {
+			return "", nil, errStale
+		}
+		t.mu.Lock()
+		t.paths[h] = vp
+		t.mu.Unlock()
+		return vp, fi, nil
 	}
 	var found string
 	var foundFI fs.FileInfo
@@ -342,13 +378,25 @@ func vino(p string) uint64 {
 	return h.Sum64() | virtualIno
 }
 
+// inoOf is the inode number of the virtual file p: derived from its path,
+// unless it was renamed. x.mu must be held.
+func (x *export) inoOf(p string) uint64 {
+	if ino, ok := x.vinos[p]; ok {
+		return ino
+	}
+	return vino(p)
+}
+
 func (x *export) virtualInfo(p string, e *specEntry) *info {
 	i := &info{
 		name:    path.Base(p),
 		mode:    goMode(e.mode),
 		mtime:   x.mtime,
 		virtual: true,
-		st:      stat{ino: vino(p), nlink: 1, uid: e.uid, gid: e.gid, atime: x.mtime, ctime: x.mtime},
+		st:      stat{ino: x.inoOf(p), nlink: 1, uid: e.uid, gid: e.gid, atime: x.mtime, ctime: x.mtime},
+	}
+	if e.hasTime {
+		i.mtime, i.st.atime, i.st.ctime = e.mtime, e.mtime, e.mtime
 	}
 	switch e.typ {
 	case "char":

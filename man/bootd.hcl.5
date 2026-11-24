@@ -232,11 +232,27 @@ service's domain, for hosts that may use
 The default is bootd's address on the network.
 .El
 .It Ic service Qq nfs
-NFS version 2 and MOUNT version 1 over UDP, read only.
+NFS version 2 and MOUNT version 1 over UDP.
 It serves the host's
 .Ic export Ns s ;
-a client may only mount its own.
-No settings.
+a client may only mount its own, and may change only those that are
+.Ic writable .
+Files are created and written on disk, owned by the user bootd runs as.
+What the disk cannot hold is kept in the export's
+.Ic spec
+instead: owners other than bootd's, device nodes, and modes that would
+keep bootd from reading or writing a file.
+When bootd runs as root, owners are set on disk, and on Linux device
+nodes and fifos too.
+A call the client sends again because the answer was lost gets the same
+answer, not an error.
+Permissions are left to the client, as for its own disk.
+.Bl -tag -width Ds
+.It Ic sync No = Ar bool
+Write data to disk before answering, as NFS version 2 requires.
+The default is false, which is much faster, but writes a client was told
+are done can be lost if the server crashes.
+.El
 .It Ic service Qq nis
 NIS (YP), read only, for one domain.
 The maps are made from files in
@@ -494,6 +510,14 @@ The owners, modes, device nodes and symbolic links it lists are served as
 given, so that a root file system extracted without root privileges can
 be served, e.g. with a specification made by
 .Dl tar -cf root.mtree --format=mtree @root.tgz
+The default is
+.Ar path Ns Pa .mtree
+next to a directory, if it exists or the export is
+.Ic writable .
+A writable export saves what clients set there, a second after they set
+it, in the full path form and without the keywords bootd does not use,
+such as checksums and sizes; the file and its directory must be
+writable by bootd.
 .It Ic export_path No = Ar path
 The path clients mount and bootparam announces.
 The default is the absolute
@@ -502,7 +526,9 @@ NetBSD keeps
 .Ar server : Ns Ar path
 in 90 bytes.
 .It Ic writable No = Ar bool
-Not supported yet.
+Let the client create, change and remove files in the export, e.g. its
+root, or write to it if it is a file, e.g. its swap.
+The default is false.
 .El
 .El
 .Sh EXAMPLES

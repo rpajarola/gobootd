@@ -78,7 +78,13 @@ type File struct {
 	// Services that may serve this file. Nil means all services of the
 	// host.
 	Services []string
-	Origin   hcl.Range
+	// Load and Execute are the addresses RPL loads the file at and
+	// starts the client at, if set.
+	Load, Execute       uint32
+	HasLoad, HasExecute bool
+	// Floppy makes RPL boot the file as a floppy disk image.
+	Floppy bool
+	Origin hcl.Range
 }
 
 // Disk is a block device image.

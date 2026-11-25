@@ -418,3 +418,33 @@ host "kali" {
 		}
 	}
 }
+
+func TestFileAddresses(t *testing.T) {
+	inv := mustBuild(t, `
+service "rpl" {}
+host "kali" {
+  file "a" {
+    load    = "0x8000"
+    execute = "36864"
+  }
+  file "b" { floppy = true }
+}`, "a", "b")
+	h, _ := inv.ByName("kali")
+	if a := h.Files[0]; !a.HasLoad || a.Load != 0x8000 || !a.HasExecute || a.Execute != 36864 {
+		t.Errorf("file a: %+v", a)
+	}
+	if b := h.Files[1]; !b.Floppy || b.HasLoad {
+		t.Errorf("file b: %+v", b)
+	}
+	_, diags := build(t, `
+service "rpl" {}
+host "kali" {
+  file "a" { load = "eight" }
+  file "b" {
+    floppy = true
+    load   = "0x100"
+  }
+}`, "a", "b")
+	wantDiag(t, diags, hcl.DiagError, `"eight" is not an address`)
+	wantDiag(t, diags, hcl.DiagError, "cannot have load or execute")
+}

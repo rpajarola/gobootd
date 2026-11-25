@@ -192,6 +192,30 @@ VMS image header) at the address in their header.
 The server name sent at the end of a load, at most six characters.
 The default is the host name, in capitals.
 .El
+.It Ic service Qq rpl
+IBM Remote Program Load, for the boot ROMs of PC network cards.
+Clients are identified by Ethernet address and get all the host's RPL
+files, each at its
+.Ic load
+address, then start at the
+.Ic execute
+address.
+.Pp
+A file with
+.Ic floppy
+is a floppy image of 160, 180, 320 or 360 KB (or another size with a BIOS
+parameter block, up to 447 KB) that boots as drive A:, e.g.\&
+a DOS boot disk.
+It is loaded to end at 576 KB, with a 1 KB loader below it that takes over
+INT 13h for drive A: and starts the image's boot sector; DOS gets the
+memory below the loader.
+Writes to the disk stay in memory until the client restarts.
+.Bl -tag -width Ds
+.It Ic send_delay No = Ar milliseconds
+The pause before each block: RPL sends the whole image without waiting
+for the client.
+The default is 10.
+.El
 .It Ic service Qq nd
 Sun Network Disk, for diskless Sun-2s running SunOS 1 and 2: the boot
 PROM reads public unit 0 before it knows its IP address, and the kernel
@@ -456,6 +480,18 @@ Other names for the file.
 .It Ic services No = Ar list
 The services that may serve it.
 The default is all the host's services.
+.It Ic load No = Ar address
+For RPL, where the file is loaded, e.g.\&
+.Li \&"0x8000\&" .
+.It Ic execute No = Ar address
+For RPL, where the client starts after loading.
+The first file that has it sets it; the default is the first file's load
+address.
+.It Ic floppy No = Ar bool
+For RPL, boot the file as a floppy disk image, without
+.Ic load
+or
+.Ic execute .
 .El
 .It Ic disk Qo Ar name Qc Brq ...
 A disk served over ND.

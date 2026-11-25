@@ -25,7 +25,7 @@ clients, but not yet against real hardware.
 | bootparam | SunOS, NetBSD, Solaris | works (with a built-in portmapper) |
 | NFSv2 | diskless root/swap | works (writable exports, MOUNT v1) |
 | NIS | SunOS and other YP clients | works (read only, no map transfer) |
-| RPL | IBM, 3Com DOS boot ROMs | planned |
+| RPL | PC network card boot ROMs | works (files at load addresses, or a floppy image as a RAM disk) |
 | BOOTP/DHCP | most | works (fixed addresses for configured hosts) |
 | HTTP | NetBSD, Solaris installers | works (read only, GET and HEAD with ranges) |
 | FTP | NetBSD, Solaris installers | works (anonymous, read only, passive and active) |
@@ -161,6 +161,13 @@ an IP address of bootd's own).
   address name: a request for `NETBSD` also finds a file named `NETBSD.SYS`,
   `netbsd` or `netbsd.sys`, and a request without a name (what the console
   usually sends) gets the host's first MOP file.
+- **RPL** sends all of a host's RPL files, each at its `load` address, and
+  starts the client at the first `execute` address. A file with
+  `floppy = true` is instead booted as drive A: from memory, with a small
+  loader ([ramdisk.S](internal/proto/rpl/ramdisk.S)) that takes over INT 13h:
+  a DOS boot floppy of up to 360 KB starts without a file server. Images
+  must fit below 576 KB together with DOS, so 1.2 and 1.44 MB floppies do
+  not.
 - **ND**: the Sun-2 PROM boots from public unit 0 (`ndp0`) before it knows its
   IP address, so the host needs a MAC address. A disk with
   `mode = "bootfile"` works like NetBSD's ndbootd: the file in `path` is the

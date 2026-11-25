@@ -170,9 +170,17 @@ type File struct {
 	// Services limits which protocols may serve the file. Defaults to all
 	// services of the host.
 	Services []string `hcl:"services,optional"`
+	// Load is the address RPL loads the file at, e.g. "0x8000".
+	Load string `hcl:"load,optional"`
+	// Execute is the address RPL starts the client at after loading.
+	Execute string `hcl:"execute,optional"`
+	// Floppy makes RPL boot the file as a floppy disk image.
+	Floppy bool `hcl:"floppy,optional"`
 
 	DefRange      hcl.Range `hcl:",def_range"`
 	ServicesRange hcl.Range `hcl:"services,attr_range"`
+	LoadRange     hcl.Range `hcl:"load,attr_range"`
+	ExecuteRange  hcl.Range `hcl:"execute,attr_range"`
 }
 
 // Disk is a block device image served by block protocols such as ND.

@@ -68,6 +68,9 @@ service "rmp" {
 service "mop" {
   # server_name = "AIAX"   # sent at the end of a load (6 characters); default: host name
 }
+service "rpl" {
+  # send_delay = 10        # milliseconds before each block
+}
 service "nd" {
   # window     = 6         # 1 KB packets per acknowledgement
   # send_delay = 10        # milliseconds before each packet
@@ -195,6 +198,18 @@ host "vs3100" {
     path     = "/export/hosts/vs3100/root"
     writable = true
   }
+}
+
+# PC with an RPL boot ROM: boots a 360 KB DOS floppy image from memory.
+host "pc" {
+  services = ["rpl"]
+  file "files/pc/dos622-360k.img" { floppy = true }
+  # Or files at addresses, as with Linux's rpld:
+  # file "files/pc/loader.com" { load = "0x8000" }
+  # file "files/pc/kernel"     {
+  #   load    = "0x10000"
+  #   execute = "0x10000"
+  # }
 }
 
 # NCD X terminal: TFTP only.

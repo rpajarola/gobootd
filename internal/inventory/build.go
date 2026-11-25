@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/hashicorp/hcl/v2"
@@ -282,10 +283,29 @@ func (b *builder) files(cs []*config.File) []*File {
 		if f.Name == "" {
 			f.Name = filepath.Base(c.Path)
 		}
+		f.Load, f.HasLoad = b.address(c.Load, &c.LoadRange)
+		f.Execute, f.HasExecute = b.address(c.Execute, &c.ExecuteRange)
+		f.Floppy = c.Floppy
+		if f.Floppy && (f.HasLoad || f.HasExecute) {
+			b.errorf(&c.LoadRange, "Floppy image with an address", "A floppy image is loaded where it fits; it cannot have load or execute.")
+		}
 		b.exists(f.Path, &c.DefRange)
 		out = append(out, f)
 	}
 	return out
+}
+
+// address parses a load or execute address such as "0x8000".
+func (b *builder) address(s string, rng *hcl.Range) (uint32, bool) {
+	if s == "" {
+		return 0, false
+	}
+	v, err := strconv.ParseUint(s, 0, 32)
+	if err != nil {
+		b.errorf(rng, "Invalid address", "%q is not an address, such as \"0x8000\".", s)
+		return 0, false
+	}
+	return uint32(v), true
 }
 
 func (b *builder) disks(cs []*config.Disk) []*Disk {

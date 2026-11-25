@@ -14,6 +14,7 @@ import (
 	"github.com/rpajarola/gobootd/internal/inventory"
 	"github.com/rpajarola/gobootd/internal/proto/mop"
 	"github.com/rpajarola/gobootd/internal/proto/pubfs"
+	"github.com/rpajarola/gobootd/internal/proto/rpl"
 	"github.com/rpajarola/gobootd/internal/resolve"
 	"github.com/rpajarola/gobootd/internal/service"
 )
@@ -178,6 +179,16 @@ func explain(path string, args []string, stdout, stderr io.Writer) int {
 	}
 	if svc == service.HTTP || svc == service.FTP {
 		return explainPath(stdout, h, svc, name)
+	}
+	if svc == service.RPL {
+		// RPL loads all the host's files: clients do not ask by name.
+		plan, err := rpl.MakePlan(h)
+		if err != nil {
+			fmt.Fprintf(stdout, "rpl request from %s fails (%v)\n", h.Name, err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "loads %s\n", plan)
+		return 0
 	}
 	find := h.FileIgnoringDir
 	if svc == service.MOP {

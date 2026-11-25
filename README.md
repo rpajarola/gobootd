@@ -19,13 +19,13 @@ clients, but not yet against real hardware.
 |---|---|---|
 | RARP | Sun, DEC, HP and others | works |
 | RMP | HP 9000/300 and /400 | works |
+| MOP | DEC VAX, DECstation, Alpha | works (load only; ELF32, a.out and MOP images) |
 | ND | Sun-2 | works (diskless SunOS 2.0) |
 | TFTP | most | works (read only; blksize, tsize, timeout options) |
 | bootparam | SunOS, NetBSD, Solaris | works (with a built-in portmapper) |
 | NFSv2 | diskless root/swap | works (writable exports, MOUNT v1) |
 | NIS | SunOS and other YP clients | works (read only, no map transfer) |
 | RPL | IBM, 3Com DOS boot ROMs | planned |
-| MOP | DEC VAX, Alpha | planned |
 | BOOTP/DHCP | most | works (fixed addresses for configured hosts) |
 | HTTP | NetBSD, Solaris installers | works (read only, GET and HEAD with ranges) |
 | FTP | NetBSD, Solaris installers | works (anonymous, read only, passive and active) |
@@ -155,6 +155,12 @@ an IP address of bootd's own).
 - **RMP**: clients without a host entry are matched to a class by the machine
   type their boot ROM sends (`match = { rmp_machtype = "HPS300" }`). The boot
   ROM's file list shows the host's RMP files in configuration order.
+- **MOP** loads images the way NetBSD's mopd does: ELF32 and a.out files
+  from address 0 (their boot programs relocate themselves), MOP images at the
+  address in their header. Unlike mopd, files need no `.SYS` suffix or MAC
+  address name: a request for `NETBSD` also finds a file named `NETBSD.SYS`,
+  `netbsd` or `netbsd.sys`, and a request without a name (what the console
+  usually sends) gets the host's first MOP file.
 - **ND**: the Sun-2 PROM boots from public unit 0 (`ndp0`) before it knows its
   IP address, so the host needs a MAC address. A disk with
   `mode = "bootfile"` works like NetBSD's ndbootd: the file in `path` is the

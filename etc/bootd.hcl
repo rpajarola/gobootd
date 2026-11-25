@@ -65,6 +65,9 @@ service "rarp" {}
 service "rmp" {
   # server_name = "aiax"   # sent to clients asking for the server; default: host name
 }
+service "mop" {
+  # server_name = "AIAX"   # sent at the end of a load (6 characters); default: host name
+}
 service "nd" {
   # window     = 6         # 1 KB packets per acknowledgement
   # send_delay = 10        # milliseconds before each packet
@@ -179,6 +182,18 @@ host "sun2" {
     # privileges, e.g. from: tar -cf root.mtree --format=mtree @root.tgz
     # spec        = "/export/hosts/sun2/root.mtree"
     # export_path = "/sun2/root"   # the path clients see; default: path
+  }
+}
+
+# VAXstation 3100: the console (B ESA0) loads the host's first MOP file,
+# e.g. NetBSD's boot.mop, then the kernel comes over NFS.
+host "vs3100" {
+  services = ["mop", "rarp", "bootparam", "nfs"]
+
+  file "files/vax/netbsd-boot.mop" { name = "NETBSD" }
+  export "root" {
+    path     = "/export/hosts/vs3100/root"
+    writable = true
   }
 }
 

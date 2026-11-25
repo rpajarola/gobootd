@@ -12,6 +12,7 @@ import (
 
 	"github.com/rpajarola/gobootd/internal/daemon"
 	"github.com/rpajarola/gobootd/internal/inventory"
+	"github.com/rpajarola/gobootd/internal/proto/mop"
 	"github.com/rpajarola/gobootd/internal/proto/pubfs"
 	"github.com/rpajarola/gobootd/internal/resolve"
 	"github.com/rpajarola/gobootd/internal/service"
@@ -178,7 +179,11 @@ func explain(path string, args []string, stdout, stderr io.Writer) int {
 	if svc == service.HTTP || svc == service.FTP {
 		return explainPath(stdout, h, svc, name)
 	}
-	f, kind, err := h.FileIgnoringDir(svc, name)
+	find := h.FileIgnoringDir
+	if svc == service.MOP {
+		find = func(_, name string) (*inventory.File, inventory.MatchKind, error) { return mop.FindFile(h, name) }
+	}
+	f, kind, err := find(svc, name)
 	if err != nil {
 		fmt.Fprintf(stdout, "%s request from %s denied (%v)\n", svc, h.Name, err)
 		if fs := h.FilesFor(svc); len(fs) > 0 {
@@ -197,6 +202,14 @@ func explain(path string, args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "  serves %s (%d bytes)\n", f.Path, st.Size())
+	if svc == service.MOP {
+		desc, err := mop.Describe(f.Path)
+		if err != nil {
+			fmt.Fprintf(stdout, "  cannot be loaded: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "  loads as %s\n", desc)
+	}
 	return 0
 }
 

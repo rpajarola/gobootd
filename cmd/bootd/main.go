@@ -20,6 +20,7 @@ import (
 	_ "github.com/rpajarola/gobootd/internal/proto/dhcp"
 	_ "github.com/rpajarola/gobootd/internal/proto/ftpd"
 	_ "github.com/rpajarola/gobootd/internal/proto/httpd"
+	_ "github.com/rpajarola/gobootd/internal/proto/mop"
 	_ "github.com/rpajarola/gobootd/internal/proto/nd"
 	_ "github.com/rpajarola/gobootd/internal/proto/nfs"
 	_ "github.com/rpajarola/gobootd/internal/proto/nis"

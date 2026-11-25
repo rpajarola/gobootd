@@ -169,6 +169,29 @@ The boot ROM lists the host's files in configuration order.
 The name sent to clients asking for the server.
 The default is the host name.
 .El
+.It Ic service Qq mop
+DEC MOP Dump/Load, for the consoles of VAXen, DECstations and Alphas and
+DEC terminal servers.
+Loads only; dumps are not taken.
+Clients are identified by Ethernet address.
+bootd volunteers to load a program when the client may load it, and a file
+named
+.Pa NAME ,
+.Pa NAME.SYS ,
+.Pa name
+or
+.Pa name.sys
+matches a request for
+.Ar NAME .
+A request without a name, the usual case, gets the host's first file.
+Files are loaded as NetBSD's mopd does: ELF32 and a.out files from address 0
+with their segments padded to their place in memory, and MOP images (with a
+VMS image header) at the address in their header.
+.Bl -tag -width Ds
+.It Ic server_name No = Ar string
+The server name sent at the end of a load, at most six characters.
+The default is the host name, in capitals.
+.El
 .It Ic service Qq nd
 Sun Network Disk, for diskless Sun-2s running SunOS 1 and 2: the boot
 PROM reads public unit 0 before it knows its IP address, and the kernel

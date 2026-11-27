@@ -19,10 +19,11 @@ import (
 )
 
 // Services that identify clients by MAC address, and services that need to
-// know the client's IP address.
+// know the client's IP address. SMB needs one of them: the IP address over
+// TCP/IP, the MAC address over NetBEUI.
 var (
 	needsMAC = []string{service.RARP, service.RMP, service.MOP, service.ND, service.RPL, service.DHCP, service.RBCS}
-	needsIP  = []string{service.RARP, service.ND, service.DHCP, service.TFTP, service.Bootparam, service.NFS, service.NIS, service.HTTP, service.FTP, service.SMB}
+	needsIP  = []string{service.RARP, service.ND, service.DHCP, service.TFTP, service.Bootparam, service.NFS, service.NIS, service.HTTP, service.FTP}
 )
 
 // Build creates an inventory from a parsed configuration, looking up missing
@@ -215,6 +216,9 @@ func (b *builder) addresses(h *Host, c *config.Host) {
 		if svcs := intersect(h.Services, needsIP); svcs != nil {
 			b.warn(&c.DefRange, "No IP address", "Host %q has no ip attribute and its name does not resolve; %s will not work for it.", h.Name, strings.Join(svcs, ", "))
 		}
+	}
+	if h.MAC == nil && !h.IP.IsValid() && slices.Contains(h.Services, service.SMB) {
+		b.warn(&c.DefRange, "No address", "Host %q has neither a MAC nor an IP address; smb will not recognize it.", h.Name)
 	}
 }
 

@@ -27,6 +27,7 @@ import (
 	_ "github.com/rpajarola/gobootd/internal/proto/rarp"
 	_ "github.com/rpajarola/gobootd/internal/proto/rmp"
 	_ "github.com/rpajarola/gobootd/internal/proto/rpl"
+	_ "github.com/rpajarola/gobootd/internal/proto/smb"
 	_ "github.com/rpajarola/gobootd/internal/proto/tftp"
 )
 

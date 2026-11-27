@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rpajarola/gobootd/internal/proto/smb"
 )
 
 const testConfig = `
@@ -149,5 +151,37 @@ func TestUsage(t *testing.T) {
 	}
 	if code, _, _ := runCmd("explain"); code != 2 {
 		t.Errorf("explain without client: exit %d", code)
+	}
+}
+
+func TestExplainSMB(t *testing.T) {
+	path := setup(t, `
+resolve {
+  ethers = ""
+  dns    = false
+}
+service "smb" {}
+host "pc" {
+  ip  = "192.0.2.9"
+  mac = "02:00:00:00:00:09"
+  share "sparc" { path = "sparc" }
+}
+`)
+	os.WriteFile(filepath.Join(filepath.Dir(path), "sparc", "Long Name.txt"), []byte("x"), 0o644)
+	for _, tc := range []struct {
+		args []string
+		code int
+		want string
+	}{
+		{[]string{"pc", "smb"}, 0, "share SPARC: "},
+		{[]string{"pc", "smb", `SPARC`}, 0, "LONG~"},
+		{[]string{"pc", "smb", `sparc\SOLARIS`}, 0, "DOS name SOLARIS, 4 bytes"},
+		{[]string{"pc", "smb", `sparc\` + smb.DOSName("Long Name.txt")}, 0, "Long Name.txt"},
+		{[]string{"pc", "smb", `DOS\X`}, 1, `denied (share "DOS" not configured for this host)`},
+	} {
+		code, out, errs := runCmd(append([]string{"explain", "-c", path}, tc.args...)...)
+		if code != tc.code || !strings.Contains(out, tc.want) {
+			t.Errorf("%v: exit %d, output:\n%s%s\nwant %q", tc.args, code, out, errs, tc.want)
+		}
 	}
 }

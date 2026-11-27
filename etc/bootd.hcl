@@ -116,6 +116,14 @@ service "nfs" {
 #   port = 21     # control port; data connections are passive or active
 # }
 
+# SMB1 shares for DOS, Windows for Workgroups and Windows 95, over NetBIOS
+# on TCP/IP and NetBEUI.
+service "smb" {
+  # netbios_name = "BOOTD"            # default: the host name
+  # workgroup    = "WORKGROUP"
+  # transports   = ["tcp", "netbeui"]
+}
+
 # HP 9000/300 and /400: RMP picks the class by the machine type the boot
 # ROM sends (an HP 425t sends "HPS300"), so new machines boot without a host
 # entry. The boot ROM lists the files by their names.
@@ -200,10 +208,16 @@ host "vs3100" {
   }
 }
 
-# PC with an RPL boot ROM: boots a 360 KB DOS floppy image from memory.
+# PC with an RPL boot ROM: boots a 360 KB DOS floppy image from memory,
+# then NET USE D: \\BOOTD\DOS and E: \\BOOTD\PC from its network client.
 host "pc" {
-  services = ["rpl"]
+  services = ["rpl", "smb"]
   file "files/pc/dos622-360k.img" { floppy = true }
+  share "dos" { path = "files/pc/dos" }
+  share "pc" {
+    path     = "/export/hosts/pc"
+    writable = true
+  }
   # Or files at addresses, as with Linux's rpld:
   # file "files/pc/loader.com" { load = "0x8000" }
   # file "files/pc/kernel"     {

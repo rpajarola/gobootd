@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"encoding/binary"
+	"fmt"
 	"net/netip"
 	"strings"
 	"testing"
@@ -201,4 +202,30 @@ func TestFormatPacket(t *testing.T) {
 			t.Errorf("unexpected nis output: %q", gotNIS)
 		}
 	})
+}
+
+func TestFormatNetBEUI(t *testing.T) {
+	ts := time.Date(2026, 10, 20, 1, 27, 41, 0, time.UTC)
+	pc, srv := mac("02:00:00:00:00:05"), mac("02:00:00:00:00:01")
+	name := func(s string, suffix byte) []byte {
+		b := []byte(fmt.Sprintf("%-15s", s))
+		return append(b, suffix)
+	}
+	query := []byte{0xf0, 0xf0, 0x03, 44, 0, 0xff, 0xef, 0x0a, 0, 1, 0, 0, 0, 9, 0}
+	query = append(append(query, name("BOOTD", 0x20)...), name("PC", 0)...)
+	session := []byte{0xf0, 0xf0, 0x04, 0x07, 14, 0, 0xff, 0xef, 0x16, 0, 0, 0, 0, 0, 3, 0, 1, 2, 'h', 'i'}
+	for _, tc := range []struct {
+		frame []byte
+		want  string
+	}{
+		{link.Build8023(mac("03:00:00:00:00:01"), pc, query), "NetBEUI UI cmd, NAME_QUERY BOOTD<20> from PC<00> session 1"},
+		{link.Build8023(srv, pc, session), "NetBEUI I ns 2 nr 3 P/F cmd, DATA_ONLY_LAST 2>1 (2 bytes)"},
+		{link.Build8023(pc, srv, []byte{0xf0, 0xf1, 0x01, 0x07}), "NetBEUI RR nr 3 P/F resp"},
+		{link.Build8023(srv, pc, []byte{0xf0, 0xf0, 0x7f}), "NetBEUI SABME P/F cmd"},
+		{link.Build8023(srv, pc, []byte{0x42, 0x42, 0x03, 0, 0}), "802.2 dsap 0x42 ssap 0x42 UI cmd (2 bytes)"},
+	} {
+		if got := FormatPacket(ts, "", tc.frame); !strings.HasSuffix(got, tc.want) {
+			t.Errorf("got  %q\nwant %q", got, tc.want)
+		}
+	}
 }

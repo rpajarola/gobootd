@@ -349,6 +349,9 @@ host "a" { ip = "192.0.2.1" }`, "rarp will not recognize it"},
 		{"no ip", `
 service "tftp" {}
 host "a" { mac = "0:0:0:0:0:1" }`, "tftp will not work for it"},
+		{"smb without addresses", `
+service "smb" {}
+host "a" {}`, "smb will not recognize it"},
 		{"shadowed name", `
 service "tftp" {}
 host "kali" {

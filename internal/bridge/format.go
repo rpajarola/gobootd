@@ -49,6 +49,9 @@ func format8023(payload []byte) string {
 	if s, ok := formatRMP(payload); ok {
 		return s
 	}
+	if s, ok := formatLLC(payload); ok {
+		return s
+	}
 	if len(payload) >= 3 {
 		return fmt.Sprintf("802.3 dsap %#02x ssap %#02x (%d bytes)", payload[0], payload[1], len(payload))
 	}

@@ -417,6 +417,44 @@ resumed.
 The control port.
 The default is 21.
 .El
+.It Ic service Qq smb
+SMB1 file sharing for DOS and early Windows: the MS-DOS and LAN Manager
+redirectors, Windows for Workgroups and Windows 95, e.g.\&
+.Li NET USE D: \e\eBOOTD\eDOS
+after an RPL boot.
+It speaks the core protocol and LAN Manager 1.0 to 2.1, not NT LM 0.12, so
+newer Windows and Samba's client need their oldest protocols enabled.
+Sessions run over NetBIOS on TCP/IP (the name service on UDP port 137,
+sessions on TCP port 139), where clients are known by IP address, and
+over NetBEUI (NetBIOS frames on 802.2 LLC), where they are known by
+Ethernet address.
+Clients find the server by broadcast name queries on either; there is
+no browsing, so it does not appear in the network neighborhood.
+.Pp
+Security is share level and passwords are not checked: a client gets
+the
+.Ic share Ns s
+of its host.
+Names that are not 8.3 are shown to clients that only know 8.3 names as
+the first characters, a tilde, a hash and the extension, e.g.\&
+.Pa ALON~K3Z.TXT ,
+and reach the file under that name; files such clients create are named
+in lower case.
+Byte range locks are accepted but not enforced, and writes are not
+synced.
+.Bl -tag -width Ds
+.It Ic netbios_name No = Ar string
+The server's NetBIOS name, at most 15 characters.
+The default is the host name up to the first dot, in capitals.
+.It Ic workgroup No = Ar string
+The workgroup the server says it is in.
+The default is
+.Qq WORKGROUP .
+.It Ic transports No = Ar list
+.Qq tcp ,
+.Qq netbeui ,
+or both, the default.
+.El
 .El
 .El
 .Sh HOSTS AND CLASSES
@@ -434,14 +472,15 @@ file.
 The IP address.
 The default is looked up by name.
 .It Ic class No = Ar name
-A class whose services, files, disks and exports the host gets as well.
+A class whose services, files, disks, exports and shares the host gets as
+well.
 The host's own take precedence over the class's of the same name.
 .It Ic services No = Ar list
 The services the host may use.
 The default is the class's, or every enabled service;
 .Li \&"all\&"
 means every enabled service.
-.It Ic file , disk , export
+.It Ic file , disk , export , share
 See
 .Sx FILES ,
 below.
@@ -450,9 +489,10 @@ below.
 Settings shared by hosts, with
 .Ic services ,
 .Ic file ,
-.Ic disk
-and
+.Ic disk ,
 .Ic export
+and
+.Ic share
 as in a host.
 .Bl -tag -width Ds
 .It Ic match No = Ar map
@@ -588,6 +628,18 @@ in 90 bytes.
 .It Ic writable No = Ar bool
 Let the client create, change and remove files in the export, e.g. its
 root, or write to it if it is a file, e.g. its swap.
+The default is false.
+.El
+.It Ic share Qo Ar name Qc Brq ...
+A directory served over SMB as
+.Li \e\e Ns Ar server Ns Li \e Ns Ar name .
+Clients see the name in capitals; DOS takes names of up to 8 characters.
+Symbolic links may not lead out of the share.
+.Bl -tag -width Ds
+.It Ic path No = Ar path
+Required.
+.It Ic writable No = Ar bool
+Let the client create, change and remove files in the share.
 The default is false.
 .El
 .El

@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/rpajarola/gobootd/internal/proto/mop"
 	"github.com/rpajarola/gobootd/internal/proto/pubfs"
 	"github.com/rpajarola/gobootd/internal/proto/rpl"
+	"github.com/rpajarola/gobootd/internal/proto/smb"
 	"github.com/rpajarola/gobootd/internal/resolve"
 	"github.com/rpajarola/gobootd/internal/service"
 )
@@ -180,6 +182,9 @@ func explain(path string, args []string, stdout, stderr io.Writer) int {
 	if svc == service.HTTP || svc == service.FTP {
 		return explainPath(stdout, h, svc, name)
 	}
+	if svc == service.SMB {
+		return explainShare(stdout, h, name)
+	}
 	if svc == service.RPL {
 		// RPL loads all the host's files: clients do not ask by name.
 		plan, err := rpl.MakePlan(h)
@@ -279,5 +284,35 @@ func explainPath(w io.Writer, h *inventory.Host, svc, name string) int {
 	}
 	defer f.Close()
 	fmt.Fprintf(w, "%s serves %s (%d bytes)\n", p, f.Source, f.Info.Size())
+	return 0
+}
+
+// explainShare shows the shares of a host, or what a path in one leads to
+// over SMB.
+func explainShare(w io.Writer, h *inventory.Host, name string) int {
+	if name == "" {
+		if len(h.Shares) == 0 {
+			fmt.Fprintf(w, "smb: no shares configured for %s\n", h.Name)
+			return 1
+		}
+		for _, s := range h.Shares {
+			fmt.Fprintf(w, "share %s%s: %s%s\n", strings.ToUpper(s.Name), rw(s.Writable), s.Path, missing(s.Path))
+		}
+		return 0
+	}
+	sh, p, err := smb.Resolve(h, name)
+	if err != nil {
+		fmt.Fprintf(w, "smb request from %s for %s denied (%v)\n", h.Name, name, err)
+		return 1
+	}
+	fmt.Fprintf(w, "%s is in share %s%s: %s\n", name, strings.ToUpper(sh.Name), rw(sh.Writable), p)
+	if fi, err := os.Stat(p); err == nil && fi.IsDir() {
+		des, _ := os.ReadDir(p)
+		for _, de := range des {
+			fmt.Fprintf(w, "  %-12s  %s\n", smb.DOSName(de.Name()), de.Name())
+		}
+	} else if err == nil {
+		fmt.Fprintf(w, "  DOS name %s, %d bytes\n", smb.DOSName(filepath.Base(p)), fi.Size())
+	}
 	return 0
 }

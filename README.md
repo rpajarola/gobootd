@@ -29,7 +29,7 @@ clients, but not yet against real hardware.
 | BOOTP/DHCP | most | works (fixed addresses for configured hosts) |
 | HTTP | NetBSD, Solaris installers | works (read only, GET and HEAD with ranges) |
 | FTP | NetBSD, Solaris installers | works (anonymous, read only, passive and active) |
-| SMB1 | DOS clients after RPL | planned |
+| SMB1 | DOS, Windows for Workgroups, Windows 95 | works (core to LANMAN2.1, over NetBIOS on TCP/IP and NetBEUI) |
 | RBCS | 3Com 3Station | needs reverse engineering |
 
 ## Install
@@ -168,6 +168,15 @@ an IP address of bootd's own).
   a DOS boot floppy of up to 360 KB starts without a file server. Images
   must fit below 576 KB together with DOS, so 1.2 and 1.44 MB floppies do
   not.
+- **SMB1** serves a host's `share` blocks to DOS and early Windows clients
+  (MS Network Client and LAN Manager for DOS, Windows for Workgroups,
+  Windows 95) in the core protocol up to LANMAN2.1, but not NT LM 0.12.
+  It runs over NetBIOS on TCP/IP (ports 137 and 139) and over NetBEUI, whose
+  sessions use 802.2 LLC type 2 links ([llc](internal/llc)). Clients are
+  known by IP or MAC address, passwords are not checked, and shares are
+  read only unless `writable`. Long names appear to 8.3 clients as
+  `ALON~K3Z.TXT` names. There is no browsing: clients `NET USE` the
+  server by name.
 - **ND**: the Sun-2 PROM boots from public unit 0 (`ndp0`) before it knows its
   IP address, so the host needs a MAC address. A disk with
   `mode = "bootfile"` works like NetBSD's ndbootd: the file in `path` is the

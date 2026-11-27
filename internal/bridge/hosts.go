@@ -147,7 +147,7 @@ func protocolOf(frame []byte) string {
 		case 0xe0:
 			return "IPX"
 		case 0xf0:
-			return "NetBIOS"
+			return "NetBEUI"
 		}
 		return "802.3"
 	case link.TypeARP:

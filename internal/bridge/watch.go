@@ -2,7 +2,6 @@ package bridge
 
 import (
 	"encoding/hex"
-	"net"
 	"net/netip"
 	"slices"
 	"strings"
@@ -128,29 +127,6 @@ func (e FrameEvent) Format(dump bool) string {
 		return line
 	}
 	return line + "\n" + hex.Dump(e.Frame)
-}
-
-// HostEntry is a host the bridge has seen on an interface.
-type HostEntry struct {
-	MAC net.HardwareAddr
-	IP  netip.Addr
-}
-
-// LANHosts returns the hosts seen on the LAN side.
-func (b *Bridge) LANHosts() []HostEntry { return b.hosts(b.lanStats.hosts) }
-
-// UDPHosts returns the hosts seen on the UDP side.
-func (b *Bridge) UDPHosts() []HostEntry { return b.hosts(b.udpStats.hosts) }
-
-func (b *Bridge) hosts(m map[[6]byte]netip.Addr) []HostEntry {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	out := make([]HostEntry, 0, len(m))
-	for mac, ip := range m {
-		out = append(out, HostEntry{MAC: net.HardwareAddr(mac[:]), IP: ip})
-	}
-	slices.SortFunc(out, func(a, b HostEntry) int { return slices.Compare(a.MAC, b.MAC) })
-	return out
 }
 
 // UDPPeers returns the peer state of each UDP transport, empty for a

@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/netip"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -117,6 +119,9 @@ func Load(path string) *Loaded {
 	}
 	inv, d := inventory.Build(cfg, r)
 	l.Diags = append(l.Diags, d...)
+	if inv != nil {
+		l.Diags = append(l.Diags, checkSubnets(cfg, inv)...)
+	}
 	for _, s := range cfg.Services {
 		if factory, ok := lookup(s.Name); ok {
 			l.Diags = append(l.Diags, DecodeOptions(factory(), s)...)
@@ -126,6 +131,58 @@ func Load(path string) *Loaded {
 		l.Inventory = inv
 	}
 	return l
+}
+
+// checkSubnets warns about hosts whose address is on none of bootd's
+// networks, or is bootd's own. Such a host gets its address over RARP or
+// BOOTP and then cannot reach bootd: it ARPs for a server it has no route
+// to, or for nothing at all.
+func checkSubnets(cfg *config.Config, inv *inventory.Inventory) hcl.Diagnostics {
+	var nets []netip.Prefix
+	var names []string
+	for _, n := range cfg.Networks {
+		if p, err := netip.ParsePrefix(n.Address); err == nil {
+			nets = append(nets, p)
+			names = append(names, fmt.Sprintf("%s (%s)", n.Name, p))
+		}
+	}
+	if len(nets) == 0 {
+		return nil
+	}
+	var diags hcl.Diagnostics
+	for _, h := range inv.Hosts {
+		if !h.IP.IsValid() {
+			continue
+		}
+		var on, own bool
+		for _, p := range nets {
+			on = on || p.Masked().Contains(h.IP)
+			own = own || p.Addr() == h.IP
+		}
+		from := ""
+		if h.IPSource != "" {
+			from = " (from " + h.IPSource + ")"
+		}
+		var d *hcl.Diagnostic
+		switch {
+		case own:
+			d = &hcl.Diagnostic{Summary: "Host has bootd's address",
+				Detail: fmt.Sprintf("Host %q has address %s%s, which is bootd's own.", h.Name, h.IP, from)}
+		case !on:
+			d = &hcl.Diagnostic{Summary: "Host address is not on the network",
+				Detail: fmt.Sprintf("Host %q has address %s%s, which is outside %s: "+
+					"a client that gets it over RARP or BOOTP cannot reach bootd.",
+					h.Name, h.IP, from, strings.Join(names, " and "))}
+		default:
+			continue
+		}
+		d.Severity = hcl.DiagWarning
+		if h.Origin.Filename != "" {
+			d.Subject = h.Origin.Ptr()
+		}
+		diags = append(diags, d)
+	}
+	return diags
 }
 
 // Run starts every enabled service and serves until ctx is cancelled or a

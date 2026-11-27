@@ -29,7 +29,7 @@ const lanTimeout = 5 * time.Minute
 const maxMSSFlows = 4096
 
 type ifStats struct {
-	hosts     map[[6]byte]netip.Addr
+	hosts     map[[6]byte]*hostState
 	rxPackets uint64
 	txPackets uint64
 	rxBytes   uint64
@@ -103,6 +103,9 @@ type Bridge struct {
 	// ring holds the last ringSize forwarded frames.
 	ring []FrameEvent
 	seq  uint64
+	// boot are the RARP and BOOTP requests waiting for a reply, by
+	// client MAC.
+	boot map[[6]byte]*bootRequest
 	// mss is the largest segment that the receiver of each TCP flow from
 	// the LAN to a peer accepts, learned from the peer's SYN.
 	mss map[link.TCPFlow]int
@@ -439,8 +442,9 @@ func (b *Bridge) Run(ctx context.Context) error {
 	b.lan = map[[6]byte]time.Time{}
 	b.udp = map[[6]byte]time.Time{}
 	b.mss = map[link.TCPFlow]int{}
-	b.lanStats = ifStats{hosts: make(map[[6]byte]netip.Addr)}
-	b.udpStats = ifStats{hosts: make(map[[6]byte]netip.Addr)}
+	b.lanStats = ifStats{hosts: make(map[[6]byte]*hostState)}
+	b.udpStats = ifStats{hosts: make(map[[6]byte]*hostState)}
+	b.boot = map[[6]byte]*bootRequest{}
 	if b.LAN != nil && b.LAN.Interface() != nil && len(b.LAN.Interface().MAC) == 6 {
 		copy(b.lanMAC[:], b.LAN.Interface().MAC)
 	}
@@ -463,6 +467,18 @@ func (b *Bridge) Run(ctx context.Context) error {
 	if interval == 0 {
 		interval = 30 * time.Second
 	}
+	wg.Go(func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case now := <-ticker.C:
+				b.checkBoot(now)
+			case <-ctx.Done():
+				return
+			}
+		}
+	})
 	if interval > 0 {
 		wg.Go(func() {
 			ticker := time.NewTicker(interval)
@@ -596,19 +612,13 @@ func (b *Bridge) fromLAN(ctx context.Context) error {
 		}
 
 		ip := findSourceIP(frame)
+		proto := protocolOf(frame)
+		now := time.Now()
 
-		var newHost, newIP bool
 		b.mu.Lock()
 		b.lanStats.rxPackets++
 		b.lanStats.rxBytes += uint64(len(frame))
-		if prevIP, ok := b.lanStats.hosts[srcMAC]; !ok {
-			b.lanStats.hosts[srcMAC] = ip
-			newHost = true
-		} else if !prevIP.IsValid() && ip.IsValid() {
-			b.lanStats.hosts[srcMAC] = ip
-			newIP = true
-		}
-		now := time.Now()
+		newHost, newIP := b.lanStats.noteHost(srcMAC, ip, proto, now)
 		b.lan[srcMAC] = now
 		delete(b.udp, srcMAC)
 
@@ -621,6 +631,7 @@ func (b *Bridge) fromLAN(ctx context.Context) error {
 		} else if newIP {
 			b.logHostIP(b.lanName(), frame[6:12], ip, netip.Addr{})
 		}
+		b.observeBoot(&b.lanStats, b.lanName(), frame, now)
 
 		// Standard Ethernet switch filtering:
 		// If destination is unicast and known on the same port (LAN), filter (drop).
@@ -729,19 +740,13 @@ func (b *Bridge) fromUDP(ctx context.Context) error {
 		}
 
 		ip := findSourceIP(frame)
+		proto := protocolOf(frame)
+		now := time.Now()
 
-		var newHost, newIP bool
 		b.mu.Lock()
 		b.udpStats.rxPackets++
 		b.udpStats.rxBytes += uint64(len(frame))
-		if prevIP, ok := b.udpStats.hosts[srcMAC]; !ok {
-			b.udpStats.hosts[srcMAC] = ip
-			newHost = true
-		} else if !prevIP.IsValid() && ip.IsValid() {
-			b.udpStats.hosts[srcMAC] = ip
-			newIP = true
-		}
-		now := time.Now()
+		newHost, newIP := b.udpStats.noteHost(srcMAC, ip, proto, now)
 		b.udp[srcMAC] = now
 		delete(b.lan, srcMAC)
 
@@ -755,6 +760,7 @@ func (b *Bridge) fromUDP(ctx context.Context) error {
 		} else if newIP {
 			b.logHostIP(b.udpName(), frame[6:12], ip, peerIP)
 		}
+		b.observeBoot(&b.udpStats, b.udpName(), frame, now)
 
 		// Standard Ethernet switch filtering:
 		// - Multicast/broadcast: flood to both other UDP peers and LAN.

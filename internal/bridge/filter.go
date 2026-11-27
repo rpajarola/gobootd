@@ -250,8 +250,8 @@ func (b *Bridge) arpAboutUDP(p []byte) bool {
 	sender, target := netip.AddrFrom4([4]byte(p[14:18])), netip.AddrFrom4([4]byte(p[24:28]))
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	for _, ip := range b.udpStats.hosts {
-		if ip == sender || ip == target {
+	for _, h := range b.udpStats.hosts {
+		if h.ip == sender || h.ip == target {
 			return true
 		}
 	}

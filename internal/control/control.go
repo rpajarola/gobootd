@@ -319,8 +319,11 @@ type macJSON struct {
 }
 
 type hostJSON struct {
-	MAC string `json:"mac"`
-	IP  string `json:"ip,omitempty"`
+	MAC        string   `json:"mac"`
+	IP         string   `json:"ip,omitempty"`
+	LastSeen   string   `json:"last_seen,omitempty"`
+	Protocols  []string `json:"protocols,omitempty"`
+	Unanswered string   `json:"unanswered,omitempty"`
 }
 
 func (s *Server) peers(w io.Writer, iface string) error {
@@ -359,7 +362,11 @@ func convertTransport(t link.TransportState) transportJSON {
 func convertHosts(hs []bridge.HostEntry) []hostJSON {
 	out := make([]hostJSON, 0, len(hs))
 	for _, h := range hs {
-		out = append(out, hostJSON{MAC: h.MAC.String(), IP: h.IP.String()})
+		hj := hostJSON{MAC: h.MAC.String(), LastSeen: timeStr(h.LastSeen), Protocols: h.Protocols, Unanswered: h.Unanswered}
+		if h.IP.IsValid() {
+			hj.IP = h.IP.String()
+		}
+		out = append(out, hj)
 	}
 	return out
 }

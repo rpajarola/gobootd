@@ -254,6 +254,16 @@ func (k MatchKind) String() string {
 	return "no match"
 }
 
+// Note is what a log line about a served file adds for this kind of match:
+// a remark that only a "*" file matched, since the client then gets a file
+// it did not name; empty for the other kinds.
+func (k MatchKind) Note() string {
+	if k == MatchWildcard {
+		return ` (only a "*" file matched)`
+	}
+	return ""
+}
+
 // ServedBy reports whether svc may serve the file for host h.
 func (f *File) ServedBy(h *Host, svc string) bool {
 	if f.Services == nil {

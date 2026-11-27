@@ -402,8 +402,11 @@ type peersView struct {
 }
 
 type host struct {
-	MAC string `json:"mac"`
-	IP  string `json:"ip"`
+	MAC        string   `json:"mac"`
+	IP         string   `json:"ip"`
+	LastSeen   string   `json:"last_seen"`
+	Protocols  []string `json:"protocols"`
+	Unanswered string   `json:"unanswered"`
 }
 
 func printPeers(w io.Writer, b []byte) error {
@@ -445,13 +448,20 @@ func printPeers(w io.Writer, b []byte) error {
 }
 
 func writeHosts(tw io.Writer, hs []host) {
-	fmt.Fprintf(tw, "MAC\tIP\t\t\n")
+	fmt.Fprintf(tw, "MAC\tIP\tLAST SEEN\tPROTOCOLS\n")
 	for _, h := range hs {
 		ip := h.IP
-		if ip == "" {
+		if ip == "" || ip == "invalid IP" {
 			ip = "-"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t\t\n", h.MAC, ip)
+		protos := strings.Join(h.Protocols, " ")
+		if protos == "" {
+			protos = "-"
+		}
+		if h.Unanswered != "" {
+			protos += " (" + h.Unanswered + " request not answered)"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", h.MAC, ip, ago(h.LastSeen), protos)
 	}
 }
 

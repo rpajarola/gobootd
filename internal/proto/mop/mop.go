@@ -178,7 +178,7 @@ func (s *Server) request(env *daemon.Env, log *slog.Logger, port link.Port, f li
 	if mcast {
 		fd.Close()
 		s.send(log, port, wrap(fr, f.Src, iface.MAC, []byte{codeASV}))
-		log.Info(fmt.Sprintf("mop request from %s: volunteering to load %s", h.Name, file.Path), "requested", req.Software, "match", how.String())
+		log.Info(fmt.Sprintf("mop request from %s: volunteering to load %s%s", h.Name, file.Path, how.Note()), "requested", req.Software, "match", how.String())
 		return
 	}
 
@@ -208,7 +208,7 @@ func (s *Server) request(env *daemon.Env, log *slog.Logger, port link.Port, f li
 		log.Warn(fmt.Sprintf("mop load of %s for %s failed (%v)", file.Path, h.Name, err))
 		return
 	}
-	log.Info(fmt.Sprintf("mop request from %s: sending %s", h.Name, file.Path),
+	log.Info(fmt.Sprintf("mop request from %s: sending %s%s", h.Name, file.Path, how.Note()),
 		"requested", req.Software, "match", how.String(), "image", img.String(), "block", bsz)
 	s.send(log, port, wrap(fr, f.Src, iface.MAC, sess.last))
 }

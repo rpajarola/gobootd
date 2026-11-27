@@ -128,7 +128,7 @@ func TestLANNoise(t *testing.T) {
 	b, _, _ := filterBridge(t)
 	bootd := mac("02:00:00:00:00:01")
 	b.udp = map[[6]byte]time.Time{[6]byte(bootd): time.Now()}
-	b.udpStats.hosts = map[[6]byte]netip.Addr{[6]byte(bootd): netip.MustParseAddr("192.168.1.250")}
+	b.udpStats.hosts = map[[6]byte]*hostState{[6]byte(bootd): {ip: netip.MustParseAddr("192.168.1.250")}}
 	bcast := netip.MustParseAddr("255.255.255.255")
 	for _, tc := range []struct {
 		name  string

@@ -127,3 +127,38 @@ func TestRunConfigErrors(t *testing.T) {
 		t.Errorf("stderr = %q", stderr.String())
 	}
 }
+
+func TestLoadSubnets(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bootd.hcl")
+	writeConfig(t, path, `
+host "ok" {
+  ip  = "192.168.1.5"
+  mac = "8:0:20:1:2:3"
+}
+host "away" {
+  ip  = "10.0.0.5"
+  mac = "8:0:20:1:2:4"
+}
+host "me" {
+  ip  = "192.168.1.1"
+  mac = "8:0:20:1:2:5"
+}
+host "noip" {
+  mac = "8:0:20:1:2:6"
+}
+`)
+	l := Load(path)
+	if l.Inventory == nil {
+		t.Fatalf("errors: %v", l.Diags)
+	}
+	var got []string
+	for _, d := range l.Diags {
+		got = append(got, d.Detail)
+	}
+	all := strings.Join(got, "\n")
+	if len(got) != 3 ||
+		!strings.Contains(all, `Host "away" has address 10.0.0.5 (from config), which is outside lan (192.168.1.1/24)`) ||
+		!strings.Contains(all, `Host "me" has address 192.168.1.1 (from config), which is bootd's own`) {
+		t.Errorf("warnings:\n%s", all)
+	}
+}

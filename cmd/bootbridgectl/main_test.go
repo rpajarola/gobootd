@@ -116,7 +116,7 @@ func TestPeers(t *testing.T) {
 		t.Fatalf("code %d: %s", code, errs)
 	}
 	got := h.out.String()
-	for _, want := range []string{"configured", "127.0.0.1:5099", h.peer.Addr().String(), "learned", testSun.String()} {
+	for _, want := range []string{"configured", "127.0.0.1:5099", h.peer.Addr().String(), "learned", testSun.String(), "PROTOCOLS", "IPv4"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("peers output missing %q:\n%s", want, got)
 		}

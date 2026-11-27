@@ -79,6 +79,12 @@ unknown destinations go to every peer.
 Frames also pass between peers, never back to the peer they came from.
 Fixed peers are sent a keepalive every 60 seconds.
 .Pp
+It logs each new host on either side and its IP address once one is
+seen, also from the RARP or BOOTP reply that gives it one.
+A RARP or BOOTP request that has no reply within 5 seconds is logged as
+not answered, once until a reply comes, so a client that nobody boots
+stands out.
+.Pp
 Listeners that other machines can reach, those not on a loopback
 address, are announced over DNS-SD and multicast DNS (RFC 6762, RFC 6763)
 as

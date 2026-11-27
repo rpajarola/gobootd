@@ -26,3 +26,24 @@ func TestPrintFrame(t *testing.T) {
 		t.Errorf("output:\n%s", s)
 	}
 }
+
+// TestPrintHosts: hosts show their protocols and an unanswered boot
+// request.
+func TestPrintHosts(t *testing.T) {
+	var out bytes.Buffer
+	err := printPeers(&out, []byte(`{"lan_hosts":[
+		{"mac":"08:00:20:00:00:01","protocols":["RARP"],"unanswered":"RARP"},
+		{"mac":"08:00:20:00:00:02","ip":"192.168.1.6","protocols":["RARP","TFTP"]}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := out.String()
+	for _, want := range []string{
+		"08:00:20:00:00:01  -            never      RARP (RARP request not answered)",
+		"08:00:20:00:00:02  192.168.1.6  never      RARP TFTP",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("output lacks %q:\n%s", want, s)
+		}
+	}
+}

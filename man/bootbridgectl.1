@@ -63,7 +63,9 @@ path, and packet printing settings.
 The UDP peers of every transport: the configured ones, the ones learned
 from the frames they sent, when each was last heard from, and which
 Ethernet addresses were learned from each.
-With the LAN side, the hosts seen there with their IP addresses.
+With the LAN side, the hosts seen there with their IP addresses, when each
+last sent a frame, the protocols it used, and whether a RARP or BOOTP
+request of the host is waiting for a reply.
 .Fl i
 limits the output to one side or to some transports; the default is
 .Cm all .

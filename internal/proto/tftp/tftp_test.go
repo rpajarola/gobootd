@@ -212,6 +212,10 @@ func TestRead(t *testing.T) {
 	if !log.Contains(`tftp transfer of `) || !log.Contains(`to kali complete`) {
 		t.Error("transfer not logged")
 	}
+	// Only C0A80105.SUN4C went to the "*" file.
+	if n := strings.Count(log.String(), `only a \"*\" file matched`); n != 1 {
+		t.Errorf("%d wildcard matches logged, want 1:\n%s", n, log)
+	}
 }
 
 func TestDenied(t *testing.T) {

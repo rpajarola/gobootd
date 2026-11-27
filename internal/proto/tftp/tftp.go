@@ -255,7 +255,7 @@ func (t *transfer) run(ctx context.Context) {
 	if t.s.retransmit > 0 {
 		t.timeout = t.s.retransmit
 	}
-	t.log.Info(fmt.Sprintf("tftp request from %s for %q: sending %s", h.Name, t.req.filename, file.Path),
+	t.log.Info(fmt.Sprintf("tftp request from %s for %q: sending %s%s", h.Name, t.req.filename, file.Path, how.Note()),
 		"match", how.String(), "bytes", st.Size(), "blksize", blksize, "mode", t.req.mode, "broadcast", t.broadcast)
 
 	var r io.Reader = f

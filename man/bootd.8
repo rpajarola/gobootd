@@ -94,6 +94,9 @@ configuration says otherwise.
 Validate the configuration, reporting errors and warnings with file and
 line, then list every host with its addresses (and where they came from),
 services and files.
+Among the warnings are hosts whose address is on none of the networks, or
+is bootd's own: such a client gets its address over RARP or BOOTP but
+cannot reach bootd.
 .It Cm explain Ar client Op Ar service Op Ar file
 Show how a request from
 .Ar client ,

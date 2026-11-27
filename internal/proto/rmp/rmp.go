@@ -234,7 +234,7 @@ func (s *Server) boot(env *daemon.Env, log *slog.Logger, f link.Frame, req Packe
 	}
 	s.sessions[f.Src.String()] = &session{id: s.lastSID, seq: req.Seq, name: req.Filename, host: h, file: file, f: fd, seen: time.Now()}
 	repl.Session = s.lastSID
-	log.Info(fmt.Sprintf("rmp boot request from %s: sending %s", h.Name, file.Path),
+	log.Info(fmt.Sprintf("rmp boot request from %s: sending %s%s", h.Name, file.Path, how.Note()),
 		"requested", req.Filename, "match", how.String(), "session", s.lastSID)
 	return repl
 }
